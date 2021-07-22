@@ -107,6 +107,6 @@ class BertDecoder(torch_nn.Module):
         # output: [b, 1]
         # ans_ids   : [b, l_a]
 
-        self.t = np.random.binomial(1, cur_step / max_step)
+        self.t = np.random.binomial(1, cur_step / max_step) if max_step != 0 else np.random.binomial(1, 1)
 
         return ans_ids[:, ith].unsqueeze(1) if self.t == 0 else output

@@ -268,6 +268,23 @@ class NarrativeModel(plt.LightningModule):
         with open(self.path_train_pred, "a+") as pred_file:
             json.dump(outputs["pred"], pred_file, indent=2, ensure_ascii=False)
 
+        n_samples = 0
+        bleu_1, bleu_4, meteor, rouge_l = 0, 0, 0, 0
+        for pair in outputs["pred"]:
+            bleu_1_, bleu_4_, meteor_, rouge_l_ = self.get_scores(**pair)
+
+            bleu_1 += bleu_1_
+            bleu_4 += bleu_4_
+            meteor += meteor_
+            rouge_l += rouge_l_
+
+            n_samples += 1
+
+        self.log("train/bleu_1", bleu_1 / n_samples, on_epoch=True, prog_bar=False)
+        self.log("train/bleu_4", bleu_4 / n_samples, on_epoch=True, prog_bar=False)
+        self.log("train/meteor", meteor / n_samples, on_epoch=True, prog_bar=False)
+        self.log("train/rouge_l", rouge_l / n_samples, on_epoch=True, prog_bar=False)
+
     def test_step(self, batch: Any, batch_idx: int):
         ques_ids = batch["ques_ids"]
         ques_mask = batch["ques_mask"]
@@ -329,6 +346,10 @@ class NarrativeModel(plt.LightningModule):
     def on_validation_batch_end(
         self, outputs: Any, batch: Any, batch_idx: int, dataloader_idx: int
     ) -> None:
+        path = "/home/ubuntu/NarrativeGraph/data/valid_prediction.json"
+        with open(path, "a+") as pred_file:
+            json.dump(outputs["pred"], pred_file, indent=2, ensure_ascii=False)
+
         n_samples = 0
         bleu_1, bleu_4, meteor, rouge_l = 0, 0, 0, 0
         for pair in outputs["pred"]:
