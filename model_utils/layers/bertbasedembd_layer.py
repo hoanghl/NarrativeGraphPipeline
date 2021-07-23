@@ -7,9 +7,9 @@ transformers.logging.set_verbosity_error()
 
 
 class BertBasedEmbedding(torch_nn.Module):
-    """Embed and generate question-aware context"""
+    """Embed and generate question-aware c"""
 
-    def __init__(self, d_bert: int = 768, d_hid: int = 64, path_bert: str = None):
+    def __init__(self, d_bert, d_hid, path_bert):
         super().__init__()
 
         self.d_bert = d_bert
@@ -21,38 +21,38 @@ class BertBasedEmbedding(torch_nn.Module):
     def forward(self):
         return
 
-    def encode_ques_para(self, ques_ids, context_ids, ques_mask, context_mask):
-        # ques: [b, len_ques]
-        # context_ids: [b, n_paras, len_para]
-        # ques_mask: [b, len_ques]
-        # context_mask: [b, n_paras, len_para]
+    def encode_ques_para(self, q_ids, c_ids, q_masks, c_masks):
+        # q: [b, l_q]
+        # c_ids: [b, n_c, l_c]
+        # q_masks: [b, l_q]
+        # c_masks: [b, n_c, l_c]
 
-        b, _, len_para = context_ids.shape
+        b, _, l_c = c_ids.shape
 
         #########################
         # Contextual embedding for question with BERT
         #########################
-        ques = self.bert_emb(input_ids=ques_ids, attention_mask=ques_mask)[0]
-        # [b, len_ques, d_bert]
+        q = self.bert_emb(input_ids=q_ids, attention_mask=q_masks)[0]
+        # [b, l_q, d_bert]
 
         #########################
-        # Contextual embedding for context with BERT
+        # Contextual embedding for c with BERT
         #########################
         # Convert to another shape to fit with
         # input shape of self.embedding
-        context = context_ids.view((-1, len_para))
-        context_mask = context_mask.view((-1, len_para))
-        # context     : [b*n_paras, len_para, d_bert]
-        # context_mask: [b*n_paras, len_para]
+        c = c_ids.view((-1, l_c))
+        c_masks = c_masks.view((-1, l_c))
+        # c     : [b*n_c, l_c, d_bert]
+        # c_masks: [b*n_c, l_c]
 
-        context = self.bert_emb(input_ids=context, attention_mask=context_mask)[0]
-        # [b*n_paras, len_para, d_bert]
-        context = context.view((b, -1, len_para, self.d_bert))
-        # [b, n_paras, len_para, d_bert]
+        c = self.bert_emb(input_ids=c, attention_mask=c_masks)[0]
+        # [b*n_c, l_c, d_bert]
+        c = c.view((b, -1, l_c, self.d_bert))
+        # [b, n_c, l_c, d_bert]
 
-        ques, context = self.lin1(ques), self.lin1(context)
+        q, c = self.lin1(q), self.lin1(c)
 
-        return ques, context
+        return q, c
 
     def get_w_embd(self, input_ids=None, input_embds=None):
         # input_ids : [b, len_]
@@ -94,11 +94,11 @@ class BertBasedEmbedding(torch_nn.Module):
         return encoded
 
     def get_output_ot(self, output):
-        # output: [b, len_ans - 1, d_vocab]
+        # output: [b, l_a - 1, d_vocab]
 
         output_ot = output @ self.bert_emb.embeddings.word_embeddings.weight
-        # [b, len_ans - 1, d_bert]
+        # [b, l_a - 1, d_bert]
         output_ot = self.lin1(output_ot)
-        # [b, len_ans - 1, d_hid]
+        # [b, l_a - 1, d_hid]
 
         return output_ot

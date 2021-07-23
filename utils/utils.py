@@ -73,8 +73,8 @@ def extras(config: DictConfig) -> None:
             config.trainer.gpus = 0
         if config.datamodule.get("pin_memory"):
             config.datamodule.pin_memory = False
-        if config.datamodule.get("num_workers"):
-            config.datamodule.num_workers = 0
+        if config.datamodule.get("n_workers"):
+            config.datamodule.n_workers = 0
 
     # force multi-gpu friendly configuration if <config.trainer.accelerator=ddp>
     accelerator = config.trainer.get("accelerator")
@@ -82,8 +82,8 @@ def extras(config: DictConfig) -> None:
         log.info(
             f"Forcing ddp friendly configuration! <config.trainer.accelerator={accelerator}>"
         )
-        if config.datamodule.get("num_workers"):
-            config.datamodule.num_workers = 0
+        if config.datamodule.get("n_workers"):
+            config.datamodule.n_workers = 0
         if config.datamodule.get("pin_memory"):
             config.datamodule.pin_memory = False
 
@@ -194,14 +194,54 @@ def finish(
 ######################################################################################
 # User-defined utils
 ######################################################################################
+from random import sample
 import multiprocessing
 import re
 
 import torch
+from torch.utils.data.sampler import Sampler
 from rouge import Rouge
 from nltk.translate.meteor_score import meteor_score
 from nltk.translate.bleu_score import sentence_bleu
 import numpy as np
+
+
+class CustomSampler(Sampler[int]):
+    r"""Samples elements sequentially, always in the same order.
+
+    Args:
+        data_source (Dataset): dataset to sample from
+    """
+
+    def __init__(self, size_dataset, n_shards):
+        self.size_dataset = size_dataset
+        self.n_shards = n_shards
+
+        self.indices = None
+        self.shuffle()
+
+    def __iter__(self):
+        return iter(self.indices)
+
+    def __len__(self) -> int:
+        return self.size_dataset
+
+    def shuffle(self):
+        size_shard = int(self.size_dataset / self.n_shards)
+
+        shard_order = sample(range(self.n_shards), self.n_shards)
+
+        self.indices = []
+        for nth_shard in shard_order:
+            start = size_shard * nth_shard
+            end = (
+                start + size_shard
+                if nth_shard != max(shard_order)
+                else self.size_dataset
+            )
+            indices = sample(range(start, end), end - start)
+
+            self.indices.extend(indices)
 
 
 class ParallelHelper:
@@ -210,7 +250,7 @@ class ParallelHelper:
         f_task: object,
         data: list,
         data_allocation: object,
-        num_workers: int = 4,
+        n_workers,
         desc=None,
         show_bar=False,
     ):
@@ -222,11 +262,11 @@ class ParallelHelper:
             self.pbar = tqdm(total=self.n_data, desc=desc)
 
         self.jobs = list()
-        for ith in range(num_workers):
-            lo_bound = ith * self.n_data // num_workers
+        for ith in range(n_workers):
+            lo_bound = ith * self.n_data // n_workers
             hi_bound = (
-                (ith + 1) * self.n_data // num_workers
-                if ith < (num_workers - 1)
+                (ith + 1) * self.n_data // n_workers
+                if ith < (n_workers - 1)
                 else self.n_data
             )
 
@@ -271,11 +311,11 @@ class ParallelHelper:
 def ipot(a1: torch.Tensor, a2: torch.Tensor, beta=2, max_iter=1000, L=1):
     """Calculate loss based on OT."""
 
-    b, len_ans, d_hid = a1.size()
-    n = b * len_ans
+    b, l_a, d_hid = a1.size()
+    n = b * l_a
 
-    # a1: [b, len_ans, d_hid]
-    # a2: [b, len_ans, d_hid]
+    # a1: [b, l_a, d_hid]
+    # a2: [b, l_a, d_hid]
 
     a1, a2 = a1.view(-1, d_hid), a2.view(-1, d_hid)
     # [n, d_hid]
@@ -310,11 +350,11 @@ def ipot(a1: torch.Tensor, a2: torch.Tensor, beta=2, max_iter=1000, L=1):
     return loss
 
 
-def process_sent(sent: str):
+def process_sent(sent):
     return re.sub(r"(\[PAD\]|\[CLS\]|\[SEP\]|\[UNK\]|\[MASK\])", "", sent).strip()
 
 
-def get_scores(ref: list, pred: str, eps=10e-8):
+def get_scores(ref: list, pred, eps=10e-8):
     """Calculate metrics BLEU-1, BLEU4, METEOR and ROUGE_L.
 
     ref = [

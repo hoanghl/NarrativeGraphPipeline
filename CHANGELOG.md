@@ -2,11 +2,18 @@
 
 ### This file contains changes and modifications during developing.
 
+## July 23 2021, 16:51
+
+- Use new _Reasoning_ moddule
+- Organize project structure
+- Still use MLE with OT loss, use hard softmax instead
+- Use new data loading strategy: modification in _preprocess_ and _datamodule_
+
 ## July 10 2021, 18:22
 
 - Use data v4.2
 - Reorganize data (raw, processed, bert-base-uncased); move some environment-dependent paths to _.env_ file
-- Add config _num_shards_
+- Add config _n_shards_
 - Stop switching En-Hn after swithching ratio reaches 1
 - Add some configurations
 
@@ -48,10 +55,10 @@
 ## June 19 2021, 11:46
 
 - Apply data _version 4_ for training: not removing stopwords, new HTML removing, start-end extraction
-- Reduce **n_paras** to _5_, **len_ans** to _15_, increase **len_para** to _170_
+- Reduce **n_c** to _5_, **l_a** to _15_, increase **l_c** to _170_
 - Officially use BertVocab instead of own vocab
 - Use **parquet** data format instead **csv**
-- Change name of fields in _dataset.py_: **ques** to **ques_ids**, **paras** to **context_ids**,...
+- Change name of fields in _dataset.py_: **q** to **q_ids**, **paras** to **c_ids**,...
 - Add _PointerGenerator_ mechanism on top of current _BertDecoder_
 - _Teacher forcing_ ratio is now backed up into checkpoints and logged into _Tensorboard_
 
@@ -91,7 +98,7 @@
 ## May 16 2021, 11:16
 
 - Modify module _DataReading_ to fit with old para separation strategy of original paper
-- Increase 'len_para' and decrease 'n_paras' in 'configs.py'
+- Increase 'l_c' and decrease 'n_c' in 'configs.py'
 - Apply data _version 3_ for training
 
 ## May 15 2021, 10:26

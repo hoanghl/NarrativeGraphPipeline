@@ -1,0 +1,104 @@
+# @package _global_
+
+##########################################
+###### GENERAL CONFIGURATIONS
+##########################################
+PATH:
+  utils: ""
+  raw: ${PATH.utils}/raw
+  bert: ${PATH.utils}/bert-base-uncased
+  processed_contx: ${PATH.utils}/processed/proc_contx/[ID].json
+  data: data/[SPLIT]/data_[SHARD].parquet
+  log: logs
+
+mode: train
+print_config: True
+ignore_warnings: True
+
+batch_size: 8
+n_workers: 1
+n_shards: 20
+
+##########################################
+###### CONFIGURATIONS FOR EACH COMPONENT
+##########################################
+l_q: 42
+l_c: 250
+l_a: 20
+n_c: 10
+l_c_contx_process: 120
+
+trainer:
+  gpus: 1
+  min_epochs: 1
+  max_epochs: 1000
+  auto_lr_find: False
+  terminate_on_nan: True
+  log_every_n_steps: 40
+  auto_scale_batch_size: False
+  gradient_clip_val: 1.0
+  accelerator: null
+  precision: 16
+  check_val_every_n_epoch: 1
+  reload_dataloaders_every_epoch: True
+  weights_summary: "top"
+  progress_bar_refresh_rate: 5
+  resume_from_checkpoint: ${PATH.log}/last_best.ckpt
+
+model:
+  _target_: src.datamodules.narrative_datamodule.NarrativeDataModule
+  l_q: ${l_q}
+  l_c: ${l_c}
+  l_a: ${l_a}
+  n_c: ${n_c}
+  n_heads: 4
+  d_hid: 64
+  d_bert: 768
+  d_vocab: 30522
+  lr: 1e-5
+  w_decay: 1e-2
+  dropout: 0.2
+  beam_size: 20
+  n_gram_beam: 8
+  path_bert: ${PATH.utils}/bert-base-uncased
+  path_pred: ${PATH.log}/pred.json
+  path_train_pred: ${PATH.log}/train_pred.json
+  path_valid_pred: ${PATH.log}/valid_pred.json
+
+datamodule:
+  _target_: src.datamodules.narrative_datamodule.NarrativeDataModule
+  batch_size: ${batch_size}
+  sizes_dataset:
+    train: 32747
+    test: 10557
+    valid: 3461
+  l_c: ${l_c}
+  n_c: ${n_c}
+  n_shards: ${n_shards}
+  path_data: ${PATH.data}
+
+callbacks:
+  ModelCheckpoint:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    monitor: "valid/loss"
+    save_top_k: 2
+    save_last: True
+    mode: "min"
+    dirpath: "checkpoints/"
+    filename: "narrative_weam-{epoch:02d}"
+  # EarlyStopping:
+  #   _target_: pytorch_lightning.callbacks.EarlyStopping
+  #   monitor: valid/bleu_1
+  #   min_delta: 0.001
+  #   patience: 4
+  #   verbose: False
+  #   mode: max
+
+logger:
+  Tensorboard:
+    _target_: pytorch_lightning.loggers.tensorboard.TensorBoardLogger
+    save_dir: ${PATH.log}/tensorboard/
+    name: default
+    version: null
+    log_graph: False
+    default_hp_metric: False

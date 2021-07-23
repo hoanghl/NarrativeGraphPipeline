@@ -1,43 +1,60 @@
 import os
 
+from pytorch_lightning import LightningDataModule, LightningModule, Trainer
+from omegaconf import OmegaConf
 import dotenv
-import hydra
-from omegaconf import DictConfig
 
-# load environment variables from `.env` file if it exists
-# recursively searches for `.env` in all folders starting from work dir
+import utils.utils as utils
+
+
 dotenv.load_dotenv(override=True)
+log = utils.get_logger()
 
 
-@hydra.main(config_path="configs/", config_name="config.yaml")
-def main(config: DictConfig):
+def run():
+    config = OmegaConf.load("./configs.yaml")
 
-    # Imports should be nested inside @hydra.main to optimize tab completion
-    # Read more here: https://github.com/facebookresearch/hydra/issues/934
-    if "task" in config and config.task == "debug":
-        os.chdir(config.work_dir)
-    from src.train import train
-    from src.predict import predict
-    from src.utils import utils
+    # Replace path_utils to value read from ENV
+    path_utils = os.environ.get("NARRATIVE_UTILS")
+    config.PATH.utils = path_utils
 
-    # A couple of optional utilities:
-    # - disabling python warnings
-    # - easier access to debug mode
-    # - forcing debug friendly configuration
-    # - forcing multi-gpu friendly configuration
-    # You can safely get rid of this line if you don't want those
+    OmegaConf.resolve(config)
+
+    assert config.mode in [
+        "train",
+        "predict",
+    ], "Mode incorrect. Must be 'train'/'predict'"
+
+    ## Do some miscellaneous things
     utils.extras(config)
+    utils.print_config(config, resolve=True)
 
-    # Pretty print config using Rich library
-    if config.get("print_config"):
-        utils.print_config(config, resolve=True)
+    log.info("Instantiating datamodule, model, callbacks, logger and trainer")
+    datamodule: LightningDataModule = DataModule(**dict(config.datamodule))
+    model: LightningModule = DECAPropModel(**dict(config.model), datamodule=datamodule)
+    callbacks = utils.init_modules(dict(config.callbacks))
+    logger = utils.init_modules(dict(config.logger))
 
-    # Train/Predict model
-    if "task" in config and config.task == "predict":
-        return predict(config)
+    if not os.path.isfile(config.trainer.resume_from_checkpoint):
+        if config.mode == "predict":
+            raise FileNotFoundError("In 'predict' mode and no checkpoint found.")
+        log.info("=> No previous checkpoint specified/found. Start fresh training.")
+        config.trainer.resume_from_checkpoint = None
     else:
-        return train(config)
+        log.info("=> Previous checkpoint found. Resume training.")
+
+    trainer: Trainer = Trainer(
+        callbacks=callbacks, logger=logger, **dict(config.trainer)
+    )
+
+    # Train/Predict the model
+    if config.mode == "train":
+        log.info("Starting training!")
+        trainer.fit(model=model, datamodule=datamodule)
+    else:
+        log.info("Starting predicting!")
+        trainer.predict(model=model, datamodule=datamodule)
 
 
 if __name__ == "__main__":
-    main()
+    run()

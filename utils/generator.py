@@ -7,12 +7,12 @@ import torch
 class GeneratorHugging(GenerationMixin):
     def __init__(
         self,
-        batch_size: int = 2,
-        min_length: int = 5,
-        max_length: int = 20,
-        num_beams: int = 10,
-        temperature: int = 1,
-        no_repeat_ngram_size: int = 5,
+        batch_size,
+        min_length,
+        max_length0,
+        num_beams0,
+        temperature,
+        no_repeat_ngram_size,
         model: Any = None,
         pad_token_id: Optional[int] = 0,
         bos_token_id: Optional[int] = 1,
@@ -307,14 +307,14 @@ class GeneratorOwn:
 
     def __init__(
         self,
-        beam_size: int = 10,
-        max_len: int = 12,
+        beam_size0,
+        max_len2,
         model=None,
-        init_tok: int = 101,
-        stop_tok: int = 102,
-        no_repeat_ngram_size: int = 5,
+        init_tok01,
+        stop_tok02,
+        no_repeat_ngram_size,
         early_stop: bool = False,
-        topk_strategy: str = "topk",
+        topk_strategy = "topk",
         threshold=0.65,
     ):
 
