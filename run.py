@@ -4,6 +4,8 @@ from pytorch_lightning import LightningDataModule, LightningModule, Trainer
 from omegaconf import OmegaConf
 import dotenv
 
+from data_utils.narrative_datamodule import NarrativeDataModule
+from model_utils.narrative_model import NarrativeModel
 import utils.utils as utils
 
 
@@ -30,8 +32,8 @@ def run():
     utils.print_config(config, resolve=True)
 
     log.info("Instantiating datamodule, model, callbacks, logger and trainer")
-    datamodule: LightningDataModule = DataModule(**dict(config.datamodule))
-    model: LightningModule = DECAPropModel(**dict(config.model), datamodule=datamodule)
+    datamodule: LightningDataModule = NarrativeDataModule(**dict(config.datamodule))
+    model: LightningModule = NarrativeModel(**dict(config.model), datamodule=datamodule)
     callbacks = utils.init_modules(dict(config.callbacks))
     logger = utils.init_modules(dict(config.logger))
 

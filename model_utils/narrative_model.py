@@ -135,7 +135,7 @@ class NarrativeModel(plt.LightningModule):
     def get_score_from_outputs(self, outputs):
         n_samples = 0
         bleu_1, bleu_4, meteor, rouge_l = 0, 0, 0, 0
-        for pair in outputs["pred"]:
+        for pair in outputs:
             try:
                 bleu_1_, bleu_4_, meteor_, rouge_l_ = get_scores(**pair)
             except ValueError:
@@ -217,7 +217,7 @@ class NarrativeModel(plt.LightningModule):
         q_masks = batch["q_masks"]
         a1_ids = batch["a1_ids"]
         a2_ids = batch["a2_ids"]
-        a1_msks = batch["a1_msks"]
+        a1_masks = batch["a1_masks"]
         c_ids = batch["c_ids"]
         c_masks = batch["c_masks"]
 
@@ -225,7 +225,7 @@ class NarrativeModel(plt.LightningModule):
             q_ids=q_ids,
             q_masks=q_masks,
             a_ids=a1_ids,
-            a_masks=a1_msks,
+            a_masks=a1_masks,
             c_ids=c_ids,
             c_masks=c_masks,
             cur_step=batch_idx,
@@ -235,7 +235,7 @@ class NarrativeModel(plt.LightningModule):
         # output_ot: [b, l_a - 1, d_hid]
         # output_mle: [b, d_vocab, l_a - 1]
 
-        loss = self.get_loss(output_mle, output_ot, a1_ids[:, 1:], a1_msks[:, 1:])
+        loss = self.get_loss(output_mle, output_ot, a1_ids[:, 1:], a1_masks[:, 1:])
         prediction = self.get_prediction(output_mle, a1_ids, a2_ids)
 
         self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=False)
@@ -246,10 +246,14 @@ class NarrativeModel(plt.LightningModule):
         return {"loss": loss, "pred": prediction}
 
     def training_epoch_end(self, outputs) -> None:
-        with open(self.path_train_pred, "a+") as pred_file:
-            json.dump(outputs["pred"], pred_file, indent=2, ensure_ascii=False)
+        preds = []
+        for p in [out["pred"] for out in outputs]:
+            preds.extend(p)
 
-        bleu_1, bleu_4, meteor, rouge_l = self.get_score_from_outputs(outputs)
+        with open(self.path_train_pred, "a+") as pred_file:
+            json.dump(preds, pred_file, indent=2, ensure_ascii=False)
+
+        bleu_1, bleu_4, meteor, rouge_l = self.get_score_from_outputs(preds)
 
         self.log("train/bleu_1", bleu_1, on_epoch=True, prog_bar=False)
         self.log("train/bleu_4", bleu_4, on_epoch=True, prog_bar=False)
@@ -260,7 +264,7 @@ class NarrativeModel(plt.LightningModule):
         q_ids = batch["q_ids"]
         q_masks = batch["q_masks"]
         a1_ids = batch["a1_ids"]
-        a1_msks = batch["a1_msks"]
+        a1_masks = batch["a1_masks"]
         c_ids = batch["c_ids"]
         c_masks = batch["c_masks"]
 
@@ -268,7 +272,7 @@ class NarrativeModel(plt.LightningModule):
             q_ids=q_ids,
             q_masks=q_masks,
             a_ids=a1_ids,
-            a_masks=a1_msks,
+            a_masks=a1_masks,
             c_ids=c_ids,
             c_masks=c_masks,
             cur_step=batch_idx,
@@ -276,7 +280,7 @@ class NarrativeModel(plt.LightningModule):
         # output_ot: [b, l_a - 1, d_hid]
         # output_mle: [b, d_vocab, l_a - 1]
 
-        loss = self.get_loss(output_mle, output_ot, a1_ids[:, 1:], a1_msks[:, 1:])
+        loss = self.get_loss(output_mle, output_ot, a1_ids[:, 1:], a1_masks[:, 1:])
 
         self.log("test/loss", loss, on_step=False, on_epoch=True, prog_bar=False)
 
@@ -287,7 +291,7 @@ class NarrativeModel(plt.LightningModule):
         q_masks = batch["q_masks"]
         a1_ids = batch["a1_ids"]
         a2_ids = batch["a2_ids"]
-        a1_msks = batch["a1_msks"]
+        a1_masks = batch["a1_masks"]
         c_ids = batch["c_ids"]
         c_masks = batch["c_masks"]
 
@@ -295,7 +299,7 @@ class NarrativeModel(plt.LightningModule):
             q_ids=q_ids,
             q_masks=q_masks,
             a_ids=a1_ids,
-            a_masks=a1_msks,
+            a_masks=a1_masks,
             c_ids=c_ids,
             c_masks=c_masks,
             is_valid=True,
@@ -303,7 +307,7 @@ class NarrativeModel(plt.LightningModule):
         # output_ot: [b, l_a - 1, d_hid]
         # output_mle: [b, d_vocab, l_a - 1]
 
-        loss = self.get_loss(output_mle, output_ot, a1_ids[:, 1:], a1_msks[:, 1:])
+        loss = self.get_loss(output_mle, output_ot, a1_ids[:, 1:], a1_masks[:, 1:])
         prediction = self.get_prediction(output_mle, a1_ids, a2_ids)
 
         self.log("valid/loss", loss, on_step=False, on_epoch=True, prog_bar=False)
@@ -311,10 +315,14 @@ class NarrativeModel(plt.LightningModule):
         return {"loss": loss, "pred": prediction}
 
     def validation_epoch_end(self, outputs) -> None:
-        with open(self.path_valid_pred, "a+") as pred_file:
-            json.dump(outputs["pred"], pred_file, indent=2, ensure_ascii=False)
+        preds = []
+        for p in [out["pred"] for out in outputs]:
+            preds.extend(p)
 
-        bleu_1, bleu_4, meteor, rouge_l = self.get_score_from_outputs(outputs)
+        with open(self.path_valid_pred, "a+") as pred_file:
+            json.dump(preds, pred_file, indent=2, ensure_ascii=False)
+
+        bleu_1, bleu_4, meteor, rouge_l = self.get_score_from_outputs(preds)
         self.log("valid/bleu_1", bleu_1, on_epoch=True, prog_bar=False)
         self.log("valid/bleu_4", bleu_4, on_epoch=True, prog_bar=False)
         self.log("valid/meteor", meteor, on_epoch=True, prog_bar=False)

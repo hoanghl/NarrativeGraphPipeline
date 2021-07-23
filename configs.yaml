@@ -15,8 +15,8 @@ mode: train
 print_config: True
 ignore_warnings: True
 
-batch_size: 8
-n_workers: 1
+batch_size: 5
+n_workers: 4
 n_shards: 20
 
 ##########################################
@@ -46,7 +46,6 @@ trainer:
   resume_from_checkpoint: ${PATH.log}/last_best.ckpt
 
 model:
-  _target_: src.datamodules.narrative_datamodule.NarrativeDataModule
   l_q: ${l_q}
   l_c: ${l_c}
   l_a: ${l_a}
@@ -66,7 +65,6 @@ model:
   path_valid_pred: ${PATH.log}/valid_pred.json
 
 datamodule:
-  _target_: src.datamodules.narrative_datamodule.NarrativeDataModule
   batch_size: ${batch_size}
   sizes_dataset:
     train: 32747
@@ -84,7 +82,7 @@ callbacks:
     save_top_k: 2
     save_last: True
     mode: "min"
-    dirpath: "checkpoints/"
+    dirpath: ${PATH.log}/tensorboard/ckpts/
     filename: "narrative_weam-{epoch:02d}"
   # EarlyStopping:
   #   _target_: pytorch_lightning.callbacks.EarlyStopping

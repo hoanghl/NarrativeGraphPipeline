@@ -80,7 +80,7 @@ class Decoder(torch_nn.Module):
         )
         input_ids = [cls_ids.unsqueeze(1)]
 
-        for ith in range(1, self.l_a + 1):
+        for ith in range(1, self.l_a):
             output = self(
                 Y=Y,
                 input_ids=torch.cat(input_ids, dim=1),
@@ -105,7 +105,6 @@ class Decoder(torch_nn.Module):
         ## Get output for OT
         output_ot = self.embd_layer.get_output_ot(output)
         # [b, l_a - 1, d_hid]
-        output_ot = 0
 
         output_mle = output.transpose(1, 2)
         # [b, d_vocab, l_a - 1]
@@ -145,7 +144,7 @@ class Decoder(torch_nn.Module):
         )
         input_ids = [cls_ids.unsqueeze(1)]
 
-        for ith in range(1, self.l_a + 1):
+        for ith in range(1, self.l_a):
             output = self(
                 Y=Y,
                 input_ids=torch.cat(input_ids, dim=1),
@@ -164,7 +163,6 @@ class Decoder(torch_nn.Module):
         ## Get output for OT
         output_ot = self.embd_layer.get_output_ot(output)
         # [b, l_a - 1, d_hid]
-        output_ot = 0
 
         output_mle = output.transpose(1, 2)
         # [b, d_vocab, l_a - 1]

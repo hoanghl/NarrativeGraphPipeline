@@ -307,14 +307,14 @@ class GeneratorOwn:
 
     def __init__(
         self,
-        beam_size0,
-        max_len2,
-        model=None,
-        init_tok01,
-        stop_tok02,
+        beam_size,
+        max_len,
+        model,
+        init_tok,
+        stop_tok,
         no_repeat_ngram_size,
-        early_stop: bool = False,
-        topk_strategy = "topk",
+        early_stop,
+        topk_strategy,
         threshold=0.65,
     ):
 

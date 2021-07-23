@@ -4,21 +4,29 @@ import torch
 
 
 class SelfAttnQueryRetrv(torch_nn.Module):
-    def __init__(self, l_c, n_heads, d_hid, device):
+    def __init__(self, l_q, l_c, n_heads, d_hid, device):
         super().__init__()
 
         self.l_c = l_c
+        self.l_q = l_q
 
         d_k = d_hid // n_heads
-        self.W_q = Parameter(torch.empty(n_heads, d_hid, d_k, device=device))
-        self.W_c = Parameter(torch.empty(n_heads, d_hid, d_k, device=device))
-        self.W_m = Parameter(torch.empty(n_heads, l_c, l_c, device=device))
-        self.W_0 = Parameter(torch.empty(n_heads, 1, device=device))
+        self.W_q = Parameter(torch.rand(n_heads, d_hid, d_k, device=device))
+        self.W_c = Parameter(torch.rand(n_heads, d_hid, d_k, device=device))
+        self.W_m = Parameter(torch.rand(n_heads, l_c, l_c, device=device))
+        self.W_0 = Parameter(torch.rand(n_heads, 1, device=device))
+        self.ff1 = torch_nn.Sequential(
+            torch_nn.Linear(self.l_c, self.l_c),
+            torch_nn.Tanh(),
+            torch_nn.BatchNorm1d(l_q),
+        )
 
     def forward(self, q, c, m):
         # q: [b, l_q, d_hid]
         # c: [b, n_c, l_c, d_hid]
         # m: [l_c, l_c]
+
+        b, n_c, _, _ = c.size()
 
         q_proj = q.unsqueeze(1) @ self.W_q
         # [b, n_heads, l_q, d_k]
@@ -28,6 +36,10 @@ class SelfAttnQueryRetrv(torch_nn.Module):
         # [b, n_heads, l_c, l_c]
 
         product = q_proj.unsqueeze(1) @ c_proj.transpose(-1, -2)
+        # [b, n_c, n_heads, l_q, l_c]
+        product = self.ff1(product.view(-1, self.l_q, self.l_c)).view(
+            b, n_c, -1, self.l_q, self.l_c
+        )
         # [b, n_c, n_heads, l_q, l_c]
         weights = torch.softmax(torch.sum(product, dim=-2), dim=-1)
         # [b, n_c, n_heads, l_c]
@@ -41,21 +53,29 @@ class SelfAttnQueryRetrv(torch_nn.Module):
 
 
 class SelfAttnContxRetrv(torch_nn.Module):
-    def __init__(self, l_q, n_heads, d_hid, device):
+    def __init__(self, l_q, l_c, n_heads, d_hid, device):
         super().__init__()
 
         self.l_q = l_q
+        self.l_c = l_c
 
         d_k = d_hid // n_heads
-        self.W_q = Parameter(torch.empty(n_heads, d_hid, d_k, device=device))
-        self.W_c = Parameter(torch.empty(n_heads, d_hid, d_k, device=device))
-        self.W_m = Parameter(torch.empty(n_heads, l_q, l_q, device=device))
-        self.W_0 = Parameter(torch.empty(n_heads, 1, device=device))
+        self.W_q = Parameter(torch.rand(n_heads, d_hid, d_k, device=device))
+        self.W_c = Parameter(torch.rand(n_heads, d_hid, d_k, device=device))
+        self.W_m = Parameter(torch.rand(n_heads, l_q, l_q, device=device))
+        self.W_0 = Parameter(torch.rand(n_heads, 1, device=device))
+        self.ff1 = torch_nn.Sequential(
+            torch_nn.Linear(self.l_q, self.l_q),
+            torch_nn.Tanh(),
+            torch_nn.BatchNorm1d(l_c),
+        )
 
     def forward(self, q, c, m):
         # q: [b, l_q, d_hid]
         # c: [b, n_c, l_c, d_hid]
         # m: [l_q, l_q]
+
+        b, n_c, _, _ = c.size()
 
         q_proj = q.unsqueeze(1) @ self.W_q
         # [b, n_heads, l_q, d_k]
@@ -65,6 +85,10 @@ class SelfAttnContxRetrv(torch_nn.Module):
         # [b, n_heads, l_q, l_q]
 
         product = c_proj @ q_proj.unsqueeze(1).transpose(-1, -2)
+        # [b, n_c, n_heads, l_c, l_q]
+        product = self.ff1(product.view(-1, self.l_c, self.l_q)).view(
+            b, n_c, -1, self.l_c, self.l_q
+        )
         # [b, n_c, n_heads, l_c, l_q]
         weights = torch.softmax(torch.sum(product, dim=-2), dim=-1)
         # [b, n_c, n_heads, l_q]
@@ -82,13 +106,13 @@ class Reasoning(torch_nn.Module):
         super().__init__()
 
         self.query_retrv = SelfAttnQueryRetrv(
-            l_c=l_c, n_heads=n_heads, d_hid=d_hid, device=device
+            l_q=l_q, l_c=l_c, n_heads=n_heads, d_hid=d_hid, device=device
         )
-        self.mem_c_retrv = Parameter(torch.empty(l_c, l_c))
+        self.mem_c_retrv = Parameter(torch.rand(l_c, l_c))
         self.contx_retrv = SelfAttnContxRetrv(
-            l_q=l_q, n_heads=n_heads, d_hid=d_hid, device=device
+            l_q=l_q, l_c=l_c, n_heads=n_heads, d_hid=d_hid, device=device
         )
-        self.mem_q_retrv = Parameter(torch.empty(l_q, l_q))
+        self.mem_q_retrv = Parameter(torch.rand(l_q, l_q))
 
         self.ff1 = torch_nn.Sequential(
             torch_nn.Linear(d_hid, d_hid * 2),

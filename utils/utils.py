@@ -194,6 +194,7 @@ def finish(
 ######################################################################################
 # User-defined utils
 ######################################################################################
+from importlib import import_module
 from random import sample
 import multiprocessing
 import re
@@ -204,6 +205,21 @@ from rouge import Rouge
 from nltk.translate.meteor_score import meteor_score
 from nltk.translate.bleu_score import sentence_bleu
 import numpy as np
+
+
+def init_modules(configs: dict):
+    modules = []
+
+    for config in configs.values():
+        target = config["_target_"]
+        parts = target.split(".")
+        mod = getattr(import_module(".".join(parts[:-1])), parts[-1])
+
+        tmp = {**config}
+        del tmp["_target_"]
+        modules.append(mod(**tmp))
+
+    return modules
 
 
 class CustomSampler(Sampler[int]):
