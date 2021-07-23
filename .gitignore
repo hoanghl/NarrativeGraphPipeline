@@ -129,7 +129,7 @@ dmypy.json
 .pyre/
 
 
-data
+data_
 logs
 
 # MacOS dumb file
@@ -142,5 +142,5 @@ tests/
 .vscode
 cmd_for_tessera.sh
 .vector_cache
-data*
+data
 *.ipynb

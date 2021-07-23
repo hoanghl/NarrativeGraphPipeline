@@ -17,7 +17,7 @@ ignore_warnings: True
 
 batch_size: 5
 n_workers: 4
-n_shards: 20
+n_shards: 32
 
 ##########################################
 ###### CONFIGURATIONS FOR EACH COMPONENT
