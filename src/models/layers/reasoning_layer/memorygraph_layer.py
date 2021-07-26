@@ -9,14 +9,14 @@ from src.models.layers.reasoning_layer.sub_layers import GraphLayer, Memory
 class GraphBasedMemoryLayer(torch_nn.Module):
     def __init__(
         self,
-        batch_size: int = 5,
-        l_q: int = 42,
-        l_a: int = 15,
-        d_hid: int = 64,
-        d_bert: int = 768,
-        d_graph: int = 2048,
-        n_nodes: int = 10,
-        n_edges: int = 40,
+        batch_size,
+        l_q,
+        l_a,
+        d_hid,
+        d_bert,
+        d_graph,
+        n_nodes,
+        n_edges,
     ):
         super().__init__()
 

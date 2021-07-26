@@ -42,7 +42,8 @@ ignore_warnings: True
 ### THIS SECTION IS FOR PATHS
 #############################################################
 PATH:
-  train_pred: ${data_dir}/train_prediction.json
+  train_pred: ${data_dir}/train_pred.json
+  valid_pred: ${data_dir}/valid_pred.json
   pred: ${data_dir}/prediction.json
   checkpoint: ${work_dir}/logs/last_best/last.ckpt
 

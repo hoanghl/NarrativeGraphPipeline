@@ -15,13 +15,13 @@ class NarrativeDataModule(plt.LightningDataModule):
         path_data: str,
         path_bert: str,
         sizes_dataset: dict,
-        batch_size: int = 5,
-        l_q: int = 42,
-        l_c_processing: int = 150,
-        l_c: int = 170,
-        l_a: int = 42,
-        n_paras: int = 5,
-        num_workers: int = 4,
+        batch_size,
+        l_q,
+        l_c_processing,
+        l_c,
+        l_a,
+        n_paras,
+        num_workers,
         **kwargs
     ):
 
@@ -43,21 +43,6 @@ class NarrativeDataModule(plt.LightningDataModule):
         self.data_train = None
         self.data_test = None
         self.data_valid = None
-
-    def prepare_data(self):
-        """Download/preprocess (tokenizer...) if needed and do not touch with self.data_train,
-        self.data_test or self.data_valid.
-        """
-        # NOTE: This is temporarily commented for saving time. Uncomment it if needing preprocessing data
-        # Preprocess(
-        #     num_workers=self.num_workers,
-        #     l_c_processing=self.l_c_processing,
-        #     n_paras=self.n_paras,
-        #     path_raw_data=self.path_raw_data,
-        #     path_processed_contx=self.path_processed_contx,
-        #     path_data=self.path_data,
-        # ).preprocess()
-        pass
 
     def setup(self, stage):
         """Load data. Set variables: self.data_train, self.data_val, self.data_test."""

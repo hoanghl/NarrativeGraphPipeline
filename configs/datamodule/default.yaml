@@ -4,7 +4,7 @@ batch_size: ${batch_size}
 num_workers: ${num_workers}
 l_q: 42
 l_c: 170
-l_a: 15
+l_a: 12
 l_c_processing: 150
 sizes_dataset:
   train: 32747

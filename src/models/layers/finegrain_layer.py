@@ -12,10 +12,10 @@ class FineGrain(torch_nn.Module):
 
     def __init__(
         self,
-        l_c: int = 170,
-        n_gru_layers: int = 5,
-        d_bert: int = 768,
-        path_bert: str = None,
+        l_c,
+        n_gru_layers,
+        d_bert,
+        path_bert,
     ):
         super().__init__()
 
@@ -141,8 +141,30 @@ class FineGrain(torch_nn.Module):
         return ques, context
 
     def encode_ans(self, ans_ids, ans_mask):
-        # ans_ids           : [b, l_a]
-        # ans_mask      : [b, l_a]
+        # ans_ids: [b, l_a]
+        # ans_mask: [b, l_a]
 
         return self.bert_emb(input_ids=ans_ids, attention_mask=ans_mask)[0]
         # [b, l_a, d_bert]
+
+    def get_w_embd(self, input_ids=None, input_embds=None):
+        # input_ids : [b, len_]
+
+        assert torch.is_tensor(input_ids) or torch.is_tensor(
+            input_embds
+        ), "One of two must not be None"
+
+        if torch.is_tensor(input_ids):
+            return self.bert_emb.embeddings.word_embeddings(input_ids)
+        return input_embds @ self.bert_emb.embeddings.word_embeddings.weight
+        # [b, len_, d_bert]
+
+    def get_output_ot(self, output):
+        # output: [b, l_a, d_vocab]
+
+        output_ot = output @ self.bert_emb.embeddings.word_embeddings.weight
+        # [b, l_a, d_bert]
+        output_ot = self.lin1(output_ot)
+        # [b, l_a, d_hid]
+
+        return output_ot

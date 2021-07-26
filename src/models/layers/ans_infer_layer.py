@@ -11,10 +11,10 @@ from src.models.layers.finegrain_layer import FineGrain
 class BertDecoder(torch_nn.Module):
     def __init__(
         self,
-        l_a: int = 15,
-        d_bert: int = 768,
-        d_vocab: int = 30552,
-        cls_tok_id: int = 101,
+        l_a,
+        d_bert,
+        d_vocab,
+        cls_tok_id,
         embd_layer: torch.nn.Module = None,
     ):
         super().__init__()
@@ -93,7 +93,14 @@ class BertDecoder(torch_nn.Module):
             # [b]
             input_ids = torch.cat((input_ids, chosen.detach()), dim=1)
 
-        return output.transpose(1, 2)
+        ## Get output for OT
+        output_ot = self.embd_layer.get_output_ot(output)[:, :-1]
+        # [b, l_a - 1, d_hid]
+
+        output_mle = output[:, :-1].transpose(1, 2)
+        # [b, d_vocab, l_a - 1]
+
+        return output_mle, output_ot
 
     def choose_scheduled_sampling(
         self,
@@ -107,6 +114,10 @@ class BertDecoder(torch_nn.Module):
         # output: [b, 1]
         # ans_ids   : [b, l_a]
 
-        self.t = np.random.binomial(1, cur_step / max_step) if max_step != 0 else np.random.binomial(1, 1)
+        self.t = (
+            np.random.binomial(1, cur_step / max_step)
+            if max_step != 0
+            else np.random.binomial(1, 1)
+        )
 
         return ans_ids[:, ith].unsqueeze(1) if self.t == 0 else output

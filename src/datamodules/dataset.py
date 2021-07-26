@@ -18,11 +18,11 @@ class NarrativeDataset(Dataset):
         path_data: str,
         path_bert: str,
         size_dataset: int,
-        l_q: int = 42,
-        l_c: int = 170,
-        l_a: int = 15,
-        n_paras: int = 5,
-        num_worker: int = 1,
+        l_q,
+        l_c,
+        l_a,
+        n_paras,
+        num_worker,
     ):
 
         self.split = split

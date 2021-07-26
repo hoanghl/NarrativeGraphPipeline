@@ -2,6 +2,12 @@
 
 ### This file contains changes and modifications during developing.
 
+## July 26 2021, 15:00
+
+- Use OT loss
+- Move/Refactor code
+- Reduce 'l_c' to 12
+
 ## July 20 2021, 00:03
 
 - Apply new PATH deployment strategy: Narrative_utils stores anthing and its path is in .env

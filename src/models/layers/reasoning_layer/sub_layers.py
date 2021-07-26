@@ -10,7 +10,7 @@ import numpy as np
 
 
 class GraphLayer(torch_nn.Module):
-    def __init__(self, d_hid: int = 64, d_graph: int = 2048, n_nodes: int = 10):
+    def __init__(self, d_hid, d_graph, n_nodes):
 
         super().__init__()
 
@@ -118,10 +118,10 @@ class GraphLayer(torch_nn.Module):
 class Memory(torch_nn.Module):
     def __init__(
         self,
-        batch_size: int = 5,
-        n_nodes: int = 10,
-        d_hid: int = 64,
-        n_edges: int = 40,
+        batch_size,
+        n_nodes,
+        d_hid,
+        n_edges,
     ):
 
         super().__init__()

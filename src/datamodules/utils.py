@@ -11,7 +11,7 @@ class CustomSampler(Sampler[int]):
         data_source (Dataset): dataset to sample from
     """
 
-    def __init__(self, size_dataset, n_shards: int = 8):
+    def __init__(self, size_dataset, n_shards):
         self.size_dataset = size_dataset
         self.n_shards = n_shards
 

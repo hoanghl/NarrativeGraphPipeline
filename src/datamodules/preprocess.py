@@ -23,11 +23,11 @@ class ContextProcessor:
     def __init__(
         self,
         nlp_spacy: spacy.Language,
-        l_c_processing: int = 150,
-        path_raw_data: str = None,
-        path_processed_contx: str = None,
-        path_data: str = None,
-        num_workers: int = 4,
+        l_c_processing,
+        path_raw_data,
+        path_processed_contx,
+        path_data,
+        num_workers,
     ):
         self.nlp_spacy = nlp_spacy
 
@@ -175,11 +175,11 @@ class EntryProcessor:
     def __init__(
         self,
         nlp_spacy: spacy.Language,
-        n_paras: int = 5,
-        path_raw_data: str = None,
-        path_processed_contx: str = None,
-        path_data: str = None,
-        num_workers: int = 4,
+        n_paras,
+        path_raw_data,
+        path_processed_contx,
+        path_data,
+        num_workers,
     ):
         self.nlp_spacy = nlp_spacy
 
@@ -414,14 +414,14 @@ class EntryProcessor:
 class Preprocess:
     def __init__(
         self,
-        num_workers: int = 4,
-        l_c_processing: int = 150,
-        n_paras: int = 5,
-        path_raw_data: str = None,
-        path_processed_contx: str = None,
-        path_data: str = None,
-        path_vocab_gen: str = None,
-        path_vocab: str = None,
+        num_workers,
+        l_c_processing,
+        n_paras,
+        path_raw_data,
+        path_processed_contx,
+        path_data,
+        path_vocab_gen,
+        path_vocab,
     ):
 
         nlp_spacy = spacy.load("en_core_web_sm")
