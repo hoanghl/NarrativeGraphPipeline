@@ -12,7 +12,7 @@ import numpy as np
 import spacy
 import unidecode
 
-from src.utils.utils import ParallelHelper
+from utils.utils import ParallelHelper
 
 
 log = logging.getLogger("spacy")

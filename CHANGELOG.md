@@ -2,6 +2,13 @@
 
 ### This file contains changes and modifications during developing.
 
+## Aug 2 2021, 14:25
+
+- Add FF layer in module _FineGrain_ in get OT to avoid NaN loss
+- Add _BeamSearch_ to valid in module _ans_infer_
+- Refactor code: remove configs and combine all into one single file, remove folder 'src', refactor _utils_
+- Add pad_index into CrossEntropy ignore index
+
 ## July 26 2021, 15:00
 
 - Use OT loss
@@ -47,7 +54,7 @@
 
 ## May 20 2021, 22:27
 
-- Change code folder name from 'modules' to 'src'
+- Change code folder name from 'modules' to '
 - Add new graph-based memory architecture _MemoryGraph_ for reasoning
 - Reuse module _FineGrain_ to embed question and paras
 - Change _Trainer_ and _CustomDataset_ to align with new updates

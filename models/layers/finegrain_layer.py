@@ -12,16 +12,18 @@ class FineGrain(torch_nn.Module):
 
     def __init__(
         self,
+        l_a,
         l_c,
         n_gru_layers,
         d_bert,
-        path_bert,
+        d_hid,
+        path_pretrained,
     ):
         super().__init__()
 
         self.d_bert = d_bert
 
-        self.bert_emb = BertModel.from_pretrained(path_bert)
+        self.bert_emb = BertModel.from_pretrained(path_pretrained)
         self.biGRU_CoAttn = torch_nn.GRU(
             d_bert,
             d_bert // 2,
@@ -44,6 +46,12 @@ class FineGrain(torch_nn.Module):
             bidirectional=True,
         )
         self.lin_attn = torch_nn.Linear(d_bert * 2, l_c)
+        self.lin1 = torch_nn.Sequential(
+            torch_nn.Linear(d_bert, d_bert),
+            torch_nn.Tanh(),
+            torch_nn.BatchNorm1d(l_a),
+            torch_nn.Linear(d_bert, d_hid),
+        )
 
     def forward(self):
         return
@@ -140,12 +148,17 @@ class FineGrain(torch_nn.Module):
 
         return ques, context
 
-    def encode_ans(self, ans_ids, ans_mask):
+    def encode_ans(self, ans_ids, ans_mask, ot_loss=False):
         # ans_ids: [b, l_a]
         # ans_mask: [b, l_a]
 
-        return self.bert_emb(input_ids=ans_ids, attention_mask=ans_mask)[0]
+        output = self.bert_emb(input_ids=ans_ids, attention_mask=ans_mask)[0]
         # [b, l_a, d_bert]
+        if ot_loss:
+            output = self.lin1(output)
+            # [b, l_a, d_hid]
+
+        return output
 
     def get_w_embd(self, input_ids=None, input_embds=None):
         # input_ids : [b, len_]

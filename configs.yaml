@@ -1,0 +1,139 @@
+# @package _global_
+
+##################################
+## GENERAL CONFIGURATIONS
+##################################
+work_dir: ${hydra:runtime.cwd}
+data_dir: ${work_dir}/data/
+print_config: True
+ignore_warnings: True
+hydra:
+  run:
+    dir: logs/runs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+
+defaults:
+  # enable color logging
+  - override hydra/hydra_logging: colorlog
+  - override hydra/job_logging: colorlog
+
+##################################
+## CONFIGURATIONS for components
+##################################
+PATH:
+  utils: ""
+  raw: ${PATH.utils}/raw
+  processed_contx: ${PATH.utils}/processed/proc_contx/[ID].json
+  data: ${PATH.utils}/processed/[SPLIT]/data_[SHARD].parquet
+  pretrained: ${PATH.utils}/bert-base-cased
+  train_pred: ${work_dir}/logs/train_pred.json
+  valid_pred: ${work_dir}/logs/valid_pred.json
+  pred: ${data_dir}/prediction.json
+  last_best: ${work_dir}/logs/last_best.ckpt
+
+mode: train
+# There are 2 modes: train, predict
+
+batch_size: 5
+n_workers: 4
+n_shards: 8
+
+l_q: 42 # sequence length of query (question)
+l_c: 170 # sequence length of each para of context
+n_paras: 10
+l_a: 12 # sequence length of answer
+
+trainer:
+  _target_: pytorch_lightning.Trainer
+  gpus: 1
+  min_epochs: 1
+  max_epochs: 50
+  auto_lr_find: False
+  terminate_on_nan: True
+  log_every_n_steps: 40
+  auto_scale_batch_size: False
+  gradient_clip_val: 1.0
+  check_val_every_n_epoch: 1
+  reload_dataloaders_every_epoch: True
+  weights_summary: "top"
+  progress_bar_refresh_rate: 5
+  resume_from_checkpoint: ${PATH.last_best}
+
+model:
+  _target_: models.narrative_model.NarrativeModel
+  batch_size: ${batch_size}
+  l_q: ${l_q}
+  l_c: ${l_c}
+  l_a: ${l_a}
+  n_nodes: 10
+  n_edges: 40
+  n_gru_layers: 5
+  d_hid: 64
+  d_bert: 768
+  d_vocab: 30522
+  d_graph: 2048
+  max_epochs: 60
+  size_dataset_train: ${datamodule.sizes_dataset.train}
+  warmup_rate: 0.2
+  lr: 1e-5
+  switch_frequency: 5
+  beam_size: 20
+  n_gram_beam: 8
+  path_pretrained:
+  path_train_pred: ${PATH.train_pred}
+  path_valid_pred: ${PATH.valid_pred}
+
+datamodule:
+  _target_: datamodules.narrative_datamodule.NarrativeDataModule
+  batch_size: ${batch_size}
+  l_q: ${l_q}
+  l_c: ${l_c}
+  l_a: ${l_a}
+  n_paras: ${n_paras}
+  n_workers: ${n_workers}
+  n_shards: ${n_shards}
+  sizes_dataset:
+    train: 32747
+    test: 10557
+    valid: 3461
+  path_data: ${PATH.data}
+  path_pretrained: ${PATH.pretrained}
+
+callbacks:
+  ModelCheckpoint:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    monitor: "valid/loss"
+    save_top_k: 2
+    save_last: True
+    mode: "min"
+    dirpath: "chkpts/"
+    filename: "narrative_graph-{epoch:02d}"
+  # EarlyStopping:
+  #   _target_: pytorch_lightning.callbacks.EarlyStopping
+  #   monitor: valid/bleu_1
+  #   min_delta: 0.001
+  #   patience: 4
+  #   verbose: False
+  #   mode: max
+
+logger:
+  tensorboard:
+    _target_: pytorch_lightning.loggers.tensorboard.TensorBoardLogger
+    save_dir: "tensorboard/"
+    name: "default"
+    version: null
+    log_graph: False
+    default_hp_metric: True
+    prefix: ""
+  # wandb:
+  #   _target_: pytorch_lightning.loggers.wandb.WandbLogger
+  #   project: "CHIME"
+  #   name: null
+  #   save_dir: "."
+  #   offline: False # set True to store all logs only locally
+  #   id: null # pass correct id to resume experiment!
+  #   # entity: ""  # set to name of your wandb team or just remove it
+  #   log_model: False
+  #   prefix: ""
+  #   job_type: "train"
+  #   group: ""
+  #   tags: []

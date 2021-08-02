@@ -8,7 +8,7 @@ import pandas as pd
 import numpy as np
 
 
-from src.utils.utils import ParallelHelper
+from utils.datamodule_utils import ParallelHelper
 
 
 class NarrativeDataset(Dataset):
@@ -16,13 +16,13 @@ class NarrativeDataset(Dataset):
         self,
         split: str,
         path_data: str,
-        path_bert: str,
+        path_pretrained: str,
         size_dataset: int,
         l_q,
         l_c,
         l_a,
         n_paras,
-        num_worker,
+        n_workers,
     ):
 
         self.split = split
@@ -30,13 +30,13 @@ class NarrativeDataset(Dataset):
         self.l_c = l_c
         self.l_a = l_a
         self.n_paras = n_paras
-        self.num_workers = num_worker
+        self.n_workers = n_workers
         self.size_dataset = size_dataset
 
         path_data = path_data.replace("[SPLIT]", split).replace("[SHARD]", "*")
         self.paths = sorted(glob.glob(path_data))
 
-        self.tokenizer = BertTokenizer.from_pretrained(path_bert)
+        self.tokenizer = BertTokenizer.from_pretrained(path_pretrained)
 
         self.curent_ith_file = -1
 
@@ -197,12 +197,12 @@ class NarrativeDataset(Dataset):
         # Fill self.ques_ids, self.ans1_ids,  self.ans2_ids,
         # answers' mask and index
         ######################
-        if self.num_workers > 1:
+        if self.n_workers > 1:
             entries = ParallelHelper(
                 self.f_process_file_multi,
                 df,
                 lambda dat, l, h: dat.iloc[l:h],
-                self.num_workers,
+                self.n_workers,
             ).launch()
         else:
             entries = list(map(self.f_process_file_single, df.itertuples()))

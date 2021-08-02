@@ -1,21 +1,18 @@
 from typing import Any, Optional
-import json, re
+import json
 
 
-from transformers import AdamW, BertTokenizer
+from transformers import AdamW, BertTokenizer, get_linear_schedule_with_warmup
 import pytorch_lightning as plt
 import torch.nn.functional as torch_F
 import torch.nn as torch_nn
 import torch
 
-from src.datamodules.narrative_datamodule import NarrativeDataModule
-from src.models.layers.reasoning_layer.memorygraph_layer import GraphBasedMemoryLayer
-from src.models.layers.finegrain_layer import FineGrain
-from src.models.layers.ans_infer_layer import BertDecoder
-from src.models.utils import BeamSearchHuggingface, BeamSearchOwn
-from utils.utils import ipot, get_scores
-
-EPSILON = 10e-10
+from datamodules.narrative_datamodule import NarrativeDataModule
+from models.layers.reasoning_layer.memorygraph_layer import GraphBasedMemoryLayer
+from models.layers.finegrain_layer import FineGrain
+from models.layers.ans_infer_layer import BertDecoder
+from utils.model_utils import ipot, get_scores
 
 
 class NarrativeModel(plt.LightningModule):
@@ -32,15 +29,14 @@ class NarrativeModel(plt.LightningModule):
         d_bert,
         d_vocab,
         d_graph,
+        max_epochs,
+        size_dataset_train,
+        warmup_rate,
         lr,
-        w_decay,
         switch_frequency,
         beam_size,
         n_gram_beam,
-        temperature,
-        topP,
-        path_bert,
-        path_pred,
+        path_pretrained,
         path_train_pred,
         path_valid_pred,
         datamodule: NarrativeDataModule = None,
@@ -50,19 +46,19 @@ class NarrativeModel(plt.LightningModule):
         super().__init__()
 
         self.d_vocab = d_vocab
+        self.batch_size = batch_size
+        self.max_epochs = max_epochs
+        self.size_dataset_train = size_dataset_train
+        self.warmup_rate = warmup_rate
         self.lr = lr
-        self.w_decay = w_decay
         self.beam_size = beam_size
         self.n_gram_beam = n_gram_beam
-        self.temperature = temperature
-        self.topP = topP
         self.l_a = l_a
         self.switch_frequency = switch_frequency
 
-        self.bert_tokenizer = BertTokenizer.from_pretrained(path_bert)
+        self.bert_tokenizer = BertTokenizer.from_pretrained(path_pretrained)
         self.datamodule = datamodule
 
-        self.path_pred = path_pred
         self.path_train_pred = path_train_pred
         self.path_valid_pred = path_valid_pred
 
@@ -70,20 +66,22 @@ class NarrativeModel(plt.LightningModule):
         # Define model
         #############################
         self.embd_layer = FineGrain(
-            l_c,
-            n_gru_layers,
-            d_bert,
-            path_bert,
+            l_a=l_a,
+            l_c=l_c,
+            n_gru_layers=n_gru_layers,
+            d_bert=d_bert,
+            d_hid=d_hid,
+            path_pretrained=path_pretrained,
         )
         self.reasoning = GraphBasedMemoryLayer(
-            batch_size,
-            l_q,
-            l_a,
-            d_hid,
-            d_bert,
-            d_graph,
-            n_nodes,
-            n_edges,
+            batch_size=batch_size,
+            l_q=l_q,
+            l_a=l_a,
+            d_hid=d_hid,
+            d_bert=d_bert,
+            d_graph=d_graph,
+            n_nodes=n_nodes,
+            n_edges=n_edges,
         )
         self.ans_infer = BertDecoder(
             l_a=l_a,
@@ -105,7 +103,9 @@ class NarrativeModel(plt.LightningModule):
         #############################
         # Define things
         #############################
-        self.criterion = torch_nn.CrossEntropyLoss()
+        self.criterion = torch_nn.CrossEntropyLoss(
+            ignore_index=self.bert_tokenizer.pad_token_id
+        )
 
     ####################################################################
     # FOR TRAINING PURPOSE
@@ -160,7 +160,7 @@ class NarrativeModel(plt.LightningModule):
         loss_mle = self.criterion(output_mle, a_ids)
 
         # Calculate OT loss
-        ans = self.embd_layer.encode_ans(input_ids=a_ids, input_masks=a_masks)
+        ans = self.embd_layer.encode_ans(ans_ids=a_ids, ans_mask=a_masks, ot_loss=True)
         # [b, l_a-1, d_hid]
 
         loss_ot = ipot(output_ot, ans)
@@ -169,7 +169,7 @@ class NarrativeModel(plt.LightningModule):
 
         return total_loss
 
-    def model(
+    def forward(
         self,
         ques_ids,
         ques_mask,
@@ -179,7 +179,8 @@ class NarrativeModel(plt.LightningModule):
         context_mask,
         cur_step,
         max_step,
-        is_valid: bool = False,
+        is_predict=False,
+        **kwargs
     ):
         # ques       : [b, l_q]
         # ques_mask  : [b, l_q]
@@ -210,31 +211,21 @@ class NarrativeModel(plt.LightningModule):
         ####################
         # Generate answer
         ####################
-        return self.ans_infer.do_train(
-            Y=Y,
-            ans_ids=ans_ids,
-            ans_mask=ans_mask,
-            cur_step=cur_step,
-            max_step=max_step,
-            is_valid=is_valid,
+        return (
+            self.ans_infer.do_train(
+                Y=Y,
+                ans_ids=ans_ids,
+                ans_mask=ans_mask,
+                cur_step=cur_step,
+                max_step=max_step,
+            )
+            if not is_predict
+            else self.ans_infer.do_predict(Y)
         )
 
     def training_step(self, batch: Any, batch_idx: int):
-        ques_ids = batch["ques_ids"]
-        ques_mask = batch["ques_mask"]
-        ans1_ids = batch["ans1_ids"]
-        ans2_ids = batch["ans2_ids"]
-        ans1_mask = batch["ans1_mask"]
-        context_ids = batch["context_ids"]
-        context_mask = batch["context_mask"]
-
-        output_mle, output_ot = self.model(
-            ques_ids=ques_ids,
-            ques_mask=ques_mask,
-            ans_ids=ans1_ids,
-            ans_mask=ans1_mask,
-            context_ids=context_ids,
-            context_mask=context_mask,
+        output_mle, output_ot = self(
+            **batch,
             cur_step=batch_idx,
             max_step=self.datamodule.data_train.size_dataset
             // self.datamodule.batch_size,
@@ -242,6 +233,9 @@ class NarrativeModel(plt.LightningModule):
         # output_ot: [b, l_a - 1, d_hid]
         # output_mle: [b, d_vocab, l_a - 1]
 
+        ans1_ids = batch["ans1_ids"]
+        ans2_ids = batch["ans2_ids"]
+        ans1_mask = batch["ans1_mask"]
         loss = self.get_loss(output_mle, output_ot, ans1_ids[:, 1:], ans1_mask[:, 1:])
 
         prediction = self.get_prediction(output_mle, ans1_ids, ans2_ids)
@@ -272,75 +266,56 @@ class NarrativeModel(plt.LightningModule):
         self.log("train/meteor", meteor, on_epoch=True, prog_bar=False)
         self.log("train/rouge_l", rouge_l, on_epoch=True, prog_bar=False)
 
-    def test_step(self, batch: Any, batch_idx: int):
-        ques_ids = batch["ques_ids"]
-        ques_mask = batch["ques_mask"]
-        ans1_ids = batch["ans1_ids"]
-        ans1_mask = batch["ans1_mask"]
-        context_ids = batch["context_ids"]
-        context_mask = batch["context_mask"]
+    def configure_optimizers(self):
+        no_decay = ["bias", "LayerNorm.weight"]
+        params1, params2 = [], []
+        for layer in [self.embd_layer, self.reasoning, self.ans_infer]:
+            for n, p in layer.named_parameters():
+                if not any(nd in n for nd in no_decay):
+                    params1.append(p)
+                else:
+                    params2.append(p)
+        optimizer_grouped_parameters = [
+            {
+                "params": params1,
+                "weight_decay": 0.95,
+            },
+            {
+                "params": params2,
+                "weight_decay": 0.0,
+            },
+        ]
+        optimizer = AdamW(params=optimizer_grouped_parameters, lr=self.lr)
 
-        pred = self.model(
-            ques_ids, ques_mask, ans1_ids, ans1_mask, context_ids, context_mask
-        )
-        # [b, d_vocab, l_a]
+        n_training_steps = self.size_dataset_train // self.batch_size * self.n_epochs
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": get_linear_schedule_with_warmup(
+                optimizer,
+                num_warmup_steps=int(n_training_steps * self.warmup_rate),
+                num_training_steps=n_training_steps,
+            ),
+        }
 
-        loss = self.criterion(pred[:, :, :-1], ans1_ids[:, 1:])
-
-        self.log("test/loss", loss, on_step=False, on_epoch=True, prog_bar=False)
-
-        return loss
+    #########################################
+    # FOR PREDICTION PURPOSE
+    #########################################
 
     def validation_step(self, batch: Any, batch_idx: int):
-        ques_ids = batch["ques_ids"]
-        ques_mask = batch["ques_mask"]
-        ans1_ids = batch["ans1_ids"]
-        ans2_ids = batch["ans2_ids"]
-        ans1_mask = batch["ans1_mask"]
-        context_ids = batch["context_ids"]
-        context_mask = batch["context_mask"]
-
-        output_mle, output_ot = self.model(
-            ques_ids=ques_ids,
-            ques_mask=ques_mask,
-            ans_ids=ans1_ids,
-            ans_mask=ans1_mask,
-            context_ids=context_ids,
-            context_mask=context_mask,
-            is_valid=True,
-        )
+        output_mle, output_ot = self(**batch)
         # output_ot: [b, l_a - 1, d_hid]
         # output_mle: [b, d_vocab, l_a - 1]
 
+        ans1_ids = batch["ans1_ids"]
+        ans2_ids = batch["ans2_ids"]
+        ans1_mask = batch["ans1_mask"]
         loss = self.get_loss(output_mle, output_ot, ans1_ids[:, 1:], ans1_mask[:, 1:])
 
         prediction = self.get_prediction(output_mle, ans1_ids, ans2_ids)
 
+        self.log("valid/loss", loss, on_step=True, on_epoch=True, prog_bar=False)
+
         return {"loss": loss, "pred": prediction}
-
-    def on_validation_batch_end(
-        self, outputs: Any, batch: Any, batch_idx: int, dataloader_idx: int
-    ) -> None:
-        path = "/home/ubuntu/NarrativeGraph/data/valid_prediction.json"
-        with open(path, "a+") as pred_file:
-            json.dump(outputs["pred"], pred_file, indent=2, ensure_ascii=False)
-
-        n_samples = 0
-        bleu_1, bleu_4, meteor, rouge_l = 0, 0, 0, 0
-        for pair in outputs["pred"]:
-            bleu_1_, bleu_4_, meteor_, rouge_l_ = self.get_scores(**pair)
-
-            bleu_1 += bleu_1_
-            bleu_4 += bleu_4_
-            meteor += meteor_
-            rouge_l += rouge_l_
-
-            n_samples += 1
-
-        self.log("valid/bleu_1", bleu_1 / n_samples, on_epoch=True, prog_bar=False)
-        self.log("valid/bleu_4", bleu_4 / n_samples, on_epoch=True, prog_bar=False)
-        self.log("valid/meteor", meteor / n_samples, on_epoch=True, prog_bar=False)
-        self.log("valid/rouge_l", rouge_l / n_samples, on_epoch=True, prog_bar=False)
 
     def validation_epoch_end(self, outputs) -> None:
         preds = []
@@ -352,141 +327,14 @@ class NarrativeModel(plt.LightningModule):
 
         bleu_1, bleu_4, meteor, rouge_l = self.get_score_from_outputs(preds)
 
-        self.log("train/bleu_1", bleu_1, on_epoch=True, prog_bar=False)
-        self.log("train/bleu_4", bleu_4, on_epoch=True, prog_bar=False)
-        self.log("train/meteor", meteor, on_epoch=True, prog_bar=False)
-        self.log("train/rouge_l", rouge_l, on_epoch=True, prog_bar=False)
-
-    def configure_optimizers(self):
-        optimizer = AdamW(
-            params=self.parameters(), lr=self.lr, weight_decay=self.w_decay
-        )
-        return {
-            "optimizer": optimizer,
-            "lr_scheduler": torch.optim.lr_scheduler.CosineAnnealingLR(
-                optimizer, T_max=15, eta_min=0
-            ),
-        }
+        self.log("valid/bleu_1", bleu_1, on_epoch=True, prog_bar=False)
+        self.log("valid/bleu_4", bleu_4, on_epoch=True, prog_bar=False)
+        self.log("valid/meteor", meteor, on_epoch=True, prog_bar=False)
+        self.log("valid/rouge_l", rouge_l, on_epoch=True, prog_bar=False)
 
     def on_validation_end(self) -> None:
         if self.current_epoch % self.switch_frequency == 0 and self.current_epoch != 0:
             self.datamodule.switch_answerability()
-
-    #########################################
-    # FOR PREDICTION PURPOSE
-    #########################################
-    def forward(self, ques_ids, ques_mask, context_ids, context_mask):
-        # ques_ids       : [b, l_q]
-        # ques_mask  : [b, l_q]
-        # context_ids      : [b, n_paras, l_c]
-        # context_mask : [b, n_paras, l_c]
-
-        b = ques_ids.size(0)
-
-        ####################
-        # Embed question, context
-        ####################
-        ques, context = self.embd_layer.encode_ques_para(
-            ques_ids=ques_ids,
-            context_ids=context_ids,
-            ques_mask=ques_mask,
-            context_mask=context_mask,
-        )
-        # ques : [b, l_q, d_bert]
-        # context: [b, n_paras, d_bert]
-
-        ####################
-        # Do reasoning
-        ####################
-        Y = self.reasoning(ques, context)
-        # [b, l_a, d_bert]
-
-        ####################
-        # Generate answer
-        ####################
-        # NOTE: This belongs to BeamSearchHugging and therefore is commented
-        # Y_ = Y.repeat_interleave(self.beam_size, dim=0)
-        # # [b_, l_a, d_bert]
-
-        # generator = BeamSearchHuggingface(
-        #     batch_size=b,
-        #     max_length=self.l_a,
-        #     num_beams=self.beam_size,
-        #     temperature=self.temperature,
-        #     no_repeat_ngram_size=self.n_gram_beam,
-        #     model=self.generate,
-        #     pad_token_id=self.bert_tokenizer.pad_token_id,
-        #     bos_token_id=self.bert_tokenizer.cls_token_id,
-        #     eos_token_id=self.bert_tokenizer.sep_token_id,
-        # )
-
-        # outputs = generator.beam_sample(None, Y_)
-
-        outputs = []
-
-        beam_search = BeamSearchOwn(
-            beam_size=self.beam_size,
-            init_tok=self.bert_tokenizer.cls_token_id,
-            stop_tok=self.bert_tokenizer.sep_token_id,
-            max_len=self.len,
-            model=self.generate_own,
-            no_repeat_ngram_size=self.n_gram_beam,
-            topk_strategy="select_mix_beam",
-        )
-
-        for b_ in range(b):
-            indices = beam_search.search(Y[b_, :, :])
-
-            outputs.append(indices)
-
-        outputs = torch.tensor(outputs, device=self.device, dtype=torch.long)
-
-        return outputs
-
-    # NOTE: This belongs to BeamSearchHugging and therefore is commented
-    # def generate(self, decoder_input_ids, encoder_outputs):
-    #     # decoder_input_ids: [b_, seq_len<=200]
-    #     # encoder_outputs  : [b_, len_, d_bert]
-
-    #     b_, seq_len = decoder_input_ids.shape
-
-    #     decoder_input_mask = torch.ones((b_, seq_len))
-    #     decoder_input_embd = self.embd_layer.encode_ans(
-    #         decoder_input_ids, decoder_input_mask
-    #     )
-    #     # [b_, seq=*, d_bert]
-
-    #     output = self.ans_infer(encoder_outputs, decoder_input_embd, decoder_input_mask)
-    #     # [b_, seq=*, d_vocab]
-
-    #     return Seq2SeqLMOutput(logits=output)
-
-    def generate_own(self, decoder_input_ids, encoder_outputs):
-        # decoder_input_ids: [seq_len<=200]
-        # encoder_outputs  : [l_a, d_bert]
-
-        decoder_input_ids = (
-            torch.LongTensor(decoder_input_ids)
-            .type_as(encoder_outputs)
-            .long()
-            .unsqueeze(0)
-        )
-
-        decoder_input_mask = torch.ones(decoder_input_ids.shape, device=self.device)
-        decoder_input_embd = self.embd_layer.encode_ans(
-            decoder_input_ids, decoder_input_mask
-        )
-        # [1, seq=*, d_bert]
-
-        encoder_outputs = encoder_outputs.unsqueeze(0)
-
-        output = self.ans_infer(encoder_outputs, decoder_input_embd, decoder_input_mask)
-        # [1, seq=*, d_vocab]
-
-        output = output.squeeze(0)
-        # [seq=*, d_vocab]
-
-        return output
 
     def predict_step(
         self,

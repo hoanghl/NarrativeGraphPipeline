@@ -3,7 +3,7 @@ from itertools import combinations
 import torch.nn as torch_nn
 import torch
 
-from src.models.layers.reasoning_layer.sub_layers import GraphLayer, Memory
+from models.layers.reasoning_layer.sub_layers import GraphLayer, Memory
 
 
 class GraphBasedMemoryLayer(torch_nn.Module):

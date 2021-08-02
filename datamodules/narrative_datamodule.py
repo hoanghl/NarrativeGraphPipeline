@@ -1,27 +1,25 @@
 from torch.utils.data import DataLoader
 import pytorch_lightning as plt
 
-from src.datamodules.utils import CustomSampler
-from src.datamodules.dataset import NarrativeDataset
+from datamodules.utils import CustomSampler
+from datamodules.dataset import NarrativeDataset
 
-# from src.datamodules.preprocess import Preprocess
+# from datamodules.preprocess import Preprocess
 
 
 class NarrativeDataModule(plt.LightningDataModule):
     def __init__(
         self,
-        path_raw_data: str,
-        path_processed_contx: str,
         path_data: str,
-        path_bert: str,
+        path_pretrained: str,
         sizes_dataset: dict,
         batch_size,
         l_q,
-        l_c_processing,
         l_c,
         l_a,
         n_paras,
-        num_workers,
+        n_workers,
+        n_shards,
         **kwargs
     ):
 
@@ -29,15 +27,13 @@ class NarrativeDataModule(plt.LightningDataModule):
 
         self.batch_size = batch_size
         self.l_q = l_q
-        self.l_c_processing = l_c_processing
         self.l_c = l_c
         self.l_a = l_a
         self.n_paras = n_paras
-        self.path_raw_data = path_raw_data
-        self.path_processed_contx = path_processed_contx
         self.path_data = path_data
-        self.path_bert = path_bert
-        self.num_workers = num_workers
+        self.path_pretrained = path_pretrained
+        self.n_workers = n_workers
+        self.n_shards = n_shards
         self.sizes_dataset = sizes_dataset
 
         self.data_train = None
@@ -48,12 +44,12 @@ class NarrativeDataModule(plt.LightningDataModule):
         """Load data. Set variables: self.data_train, self.data_val, self.data_test."""
         dataset_args = {
             "path_data": self.path_data,
-            "path_bert": self.path_bert,
+            "path_pretrained": self.path_pretrained,
             "l_q": self.l_q,
             "l_c": self.l_c,
             "l_a": self.l_a,
             "n_paras": self.n_paras,
-            "num_worker": self.num_workers,
+            "num_worker": self.n_workers,
         }
         if stage == "fit":
             self.data_train = NarrativeDataset(
@@ -72,7 +68,7 @@ class NarrativeDataModule(plt.LightningDataModule):
         return DataLoader(
             dataset=self.data_train,
             batch_size=self.batch_size,
-            sampler=CustomSampler(self.sizes_dataset["train"]),
+            sampler=CustomSampler(self.sizes_dataset["train"], self.n_shards),
         )
 
     def val_dataloader(self):
@@ -81,7 +77,7 @@ class NarrativeDataModule(plt.LightningDataModule):
         return DataLoader(
             dataset=self.data_valid,
             batch_size=self.batch_size,
-            sampler=CustomSampler(self.sizes_dataset["valid"]),
+            sampler=CustomSampler(self.sizes_dataset["valid"], self.n_shards),
         )
 
     def test_dataloader(self):
@@ -90,7 +86,7 @@ class NarrativeDataModule(plt.LightningDataModule):
         return DataLoader(
             dataset=self.data_test,
             batch_size=self.batch_size,
-            sampler=CustomSampler(self.sizes_dataset["test"]),
+            sampler=CustomSampler(self.sizes_dataset["test"], self.n_shards),
         )
 
     def predict_dataloader(self):
@@ -99,7 +95,7 @@ class NarrativeDataModule(plt.LightningDataModule):
         return DataLoader(
             dataset=self.data_test,
             batch_size=self.batch_size,
-            sampler=CustomSampler(self.sizes_dataset["test"]),
+            sampler=CustomSampler(self.sizes_dataset["test"], self.n_shards),
         )
 
     def switch_answerability(self):
