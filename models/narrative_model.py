@@ -88,6 +88,9 @@ class NarrativeModel(plt.LightningModule):
             d_bert=d_bert,
             d_vocab=d_vocab,
             cls_tok_id=self.bert_tokenizer.cls_token_id,
+            sep_tok_id=self.bert_tokenizer.sep_token,
+            beam_size=beam_size,
+            n_gram_beam=n_gram_beam,
             embd_layer=self.embd_layer,
         )
 

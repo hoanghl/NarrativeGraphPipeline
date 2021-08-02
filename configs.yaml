@@ -24,7 +24,7 @@ PATH:
   raw: ${PATH.utils}/raw
   processed_contx: ${PATH.utils}/processed/proc_contx/[ID].json
   data: ${PATH.utils}/processed/[SPLIT]/data_[SHARD].parquet
-  pretrained: ${PATH.utils}/bert-base-cased
+  pretrained: ${PATH.utils}/bert-base-uncased
   train_pred: ${work_dir}/logs/train_pred.json
   valid_pred: ${work_dir}/logs/valid_pred.json
   pred: ${data_dir}/prediction.json
@@ -78,7 +78,7 @@ model:
   switch_frequency: 5
   beam_size: 20
   n_gram_beam: 8
-  path_pretrained:
+  path_pretrained: ${PATH.pretrained}
   path_train_pred: ${PATH.train_pred}
   path_valid_pred: ${PATH.valid_pred}
 

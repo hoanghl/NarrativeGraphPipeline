@@ -96,12 +96,12 @@ def extras(config: DictConfig) -> None:
 def print_config(
     config: DictConfig,
     fields: Sequence[str] = (
+        "PATH",
         "trainer",
         "model",
         "datamodule",
         "callbacks",
         "logger",
-        "seed",
     ),
     resolve: bool = True,
 ) -> None:

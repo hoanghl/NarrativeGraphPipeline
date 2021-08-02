@@ -1,5 +1,3 @@
-import random
-
 from transformers import BertConfig, BertModel
 import torch.nn as torch_nn
 import torch
