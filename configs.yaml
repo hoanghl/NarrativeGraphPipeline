@@ -31,7 +31,7 @@ PATH:
   last_best: ${work_dir}/logs/last_best.ckpt
 
 mode: train
-# There are 2 modes: train, predict
+# There are 3 modes: train, predict and debug
 
 batch_size: 5
 n_workers: 4
@@ -46,7 +46,7 @@ trainer:
   _target_: pytorch_lightning.Trainer
   gpus: 1
   min_epochs: 1
-  max_epochs: 50
+  max_epochs: 60
   auto_lr_find: False
   terminate_on_nan: True
   log_every_n_steps: 40
@@ -64,14 +64,14 @@ model:
   l_q: ${l_q}
   l_c: ${l_c}
   l_a: ${l_a}
-  n_nodes: 10
+  n_nodes: 45
   n_edges: 40
   n_gru_layers: 5
   d_hid: 64
   d_bert: 768
   d_vocab: 30522
   d_graph: 2048
-  max_epochs: 60
+  n_epochs: ${trainer.max_epochs}
   size_dataset_train: ${datamodule.sizes_dataset.train}
   warmup_rate: 0.2
   lr: 1e-5

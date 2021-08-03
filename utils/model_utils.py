@@ -17,7 +17,7 @@ def ipot(a1: torch.Tensor, a2: torch.Tensor, beta=2, max_iter=1000, L=1):
     # a1: [b, l_a, d_hid]
     # a2: [b, l_a, d_hid]
 
-    a1, a2 = a1.view(-1, d_hid), a2.view(-1, d_hid)
+    a1, a2 = a1.reshape(-1, d_hid), a2.reshape(-1, d_hid)
     # [n, d_hid]
 
     # Calculate matrix C

@@ -26,7 +26,13 @@ def main(config: DictConfig):
     assert config.mode in [
         "train",
         "predict",
-    ], f"Mode incorrect. Must be 'train'/'predict', not {config.mode}"
+        "debug_train",
+        "debug_predict",
+    ], f"Mode incorrect. Must be 'train'/'predict/debug_train/debug_predict', not {config.mode}"
+
+    if config.mode.startswith("debug"):
+        config.callbacks = config.logger = None
+        os.chdir(config.work_dir)
 
     utils.extras(config)
     utils.print_config(config, resolve=True)
@@ -42,7 +48,7 @@ def main(config: DictConfig):
 
     # Init lightning callbacks
     callbacks: List[Callback] = []
-    if "callbacks" in config:
+    if "callbacks" in config and config.callbacks is not None:
         for _, cb_conf in config.callbacks.items():
             if "_target_" in cb_conf:
                 log.info(f"Instantiating callback <{cb_conf._target_}>")
@@ -51,7 +57,7 @@ def main(config: DictConfig):
     # Init lightning loggers
     default_log = "tensorboard" if "log" not in config else config.log
     logger: List[LightningLoggerBase] = []
-    if "logger" in config:
+    if "logger" in config and config.logger is not None:
         for name, lg_conf in config.logger.items():
             if name != default_log:
                 continue
@@ -87,14 +93,12 @@ def main(config: DictConfig):
     )
 
     # Train the model
-    if config.task == "train":
+    if config.mode.endswith("train"):
         log.info("Starting training!")
         trainer.fit(model=model, datamodule=datamodule)
-    elif config.task == "predict":
+    else:
         log.info("Starting predicting!")
         trainer.predict(model=model, datamodule=datamodule)
-    else:
-        raise ValueError("Setting 'task' must be either train|predict.")
 
     # Make sure everything closed properly
     log.info("Finalizing!")

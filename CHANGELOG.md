@@ -2,6 +2,11 @@
 
 ### This file contains changes and modifications during developing.
 
+## Aug 3 2021, 10:27
+
+- Add 2 modes: _debug_train_ and _debug_predict_
+- Fix important errors
+
 ## Aug 2 2021, 14:25
 
 - Add FF layer in module _FineGrain_ in get OT to avoid NaN loss

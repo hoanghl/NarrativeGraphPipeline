@@ -157,7 +157,7 @@ class BertDecoder(torch_nn.Module):
         for b_ in range(b):
             indices = beam_search.search(encoder_outputs=Y[b_, :, :])
             output_ids.append(indices)
-        output_ids = torch.LongTensor(output_ids, device=Y.device)[:, 1:]
+        output_ids = torch.tensor(output_ids, device=Y.device).long()[:, 1:]
         # [b, l_a]
 
         output_mask = torch.zeros(output_ids.size(), device=Y.device)
@@ -176,9 +176,11 @@ class BertDecoder(torch_nn.Module):
         # decoder_input_ids: [l_]
         # encoder_outputs  : [l_a, d_bert]
 
-        decoder_input_ids = torch.LongTensor(
-            decoder_input_ids, device=encoder_outputs.device
-        ).unsqueeze(0)
+        decoder_input_ids = (
+            torch.tensor(decoder_input_ids, device=encoder_outputs.device)
+            .long()
+            .unsqueeze(0)
+        )
         decoder_input_mask = torch.ones(
             decoder_input_ids.size(), device=encoder_outputs.device
         )

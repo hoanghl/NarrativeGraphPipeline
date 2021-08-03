@@ -59,11 +59,6 @@ class GraphBasedMemoryLayer(torch_nn.Module):
         ######################################
         # Get things from memory
         node_feats_mem, edge_indx, edge_len = self.memory.gets()
-        # print(f"node_feats_mem  max: {node_feats_mem.max()}")
-        # print(f"node_feats_mem  min: {node_feats_mem.min()}")
-        # if node_feats_mem.max() > 1e5 or node_feats_mem.min() < -1e5:
-        #     print("Too large/small as resoning: get memory")
-        #     raise ValueError()
         # node_feats_mem    : [batch, n_nodes, d_hid]
         # edge_indx         : [batch, 2, n_edges]
         # edge_len          : [batch]
@@ -98,11 +93,6 @@ class GraphBasedMemoryLayer(torch_nn.Module):
         ######################################
         Y = self.graph(node_feats, edge_indx, node_len, edge_len)
         # [b, n_nodes, d_hid]
-        # print(f"Y graph         max: {Y.max()}")
-        # print(f"Y graph         min: {Y.min()}")
-        # if Y.max() > 1e10 or Y.min() < -1e10:
-        #     print("Too large/small as resoning: graph")
-        #     raise ValueError()
 
         ######################################
         # Update memory

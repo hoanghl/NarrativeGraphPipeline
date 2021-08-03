@@ -49,7 +49,7 @@ class NarrativeDataModule(plt.LightningDataModule):
             "l_c": self.l_c,
             "l_a": self.l_a,
             "n_paras": self.n_paras,
-            "num_worker": self.n_workers,
+            "n_workers": self.n_workers,
         }
         if stage == "fit":
             self.data_train = NarrativeDataset(
