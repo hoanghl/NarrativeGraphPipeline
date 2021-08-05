@@ -46,11 +46,12 @@ class FineGrain(torch_nn.Module):
             bidirectional=True,
         )
         self.lin_attn = torch_nn.Linear(d_bert * 2, l_c)
+        # NOTE: In case loss keeps not decreasing, discard self.lin1
         self.lin1 = torch_nn.Sequential(
             torch_nn.Linear(d_bert, d_bert),
             torch_nn.Tanh(),
             torch_nn.BatchNorm1d(l_a),
-            torch_nn.Linear(d_bert, d_hid),
+            torch_nn.Linear(d_bert, d_hid // 2),
         )
 
     def forward(self):
@@ -159,18 +160,6 @@ class FineGrain(torch_nn.Module):
             # [b, l_a, d_hid]
 
         return output
-
-    def get_w_embd(self, input_ids=None, input_embds=None):
-        # input_ids : [b, len_]
-
-        assert torch.is_tensor(input_ids) or torch.is_tensor(
-            input_embds
-        ), "One of two must not be None"
-
-        if torch.is_tensor(input_ids):
-            return self.bert_emb.embeddings.word_embeddings(input_ids)
-        return input_embds @ self.bert_emb.embeddings.word_embeddings.weight
-        # [b, len_, d_bert]
 
     def get_output_ot(self, output):
         # output: [b, l_a, d_vocab]

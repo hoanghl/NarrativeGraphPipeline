@@ -243,8 +243,6 @@ class NarrativeModel(plt.LightningModule):
         ans1_mask = batch["ans1_mask"]
         loss = self.get_loss(output_mle, output_ot, ans1_ids, ans1_mask)
 
-        prediction = self.get_prediction(output_mle, ans1_ids, ans2_ids)
-
         self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=False)
         self.log(
             "train/sampling",
@@ -254,12 +252,19 @@ class NarrativeModel(plt.LightningModule):
             prog_bar=False,
         )
 
-        return {"loss": loss, "pred": prediction}
+        return {
+            "loss": loss,
+            "pred": (
+                output_mle.cpu().detach().numpy(),
+                ans1_ids.cpu().detach().numpy(),
+                ans2_ids.cpu().detach().numpy(),
+            ),
+        }
 
     def training_epoch_end(self, outputs) -> None:
         preds = []
         for p in [out["pred"] for out in outputs]:
-            preds.extend(p)
+            preds.extend(self.get_prediction(p[0], p[1], p[2]))
 
         with open(self.path_train_pred, "a+") as pred_file:
             json.dump(preds, pred_file, indent=2, ensure_ascii=False)
@@ -272,25 +277,26 @@ class NarrativeModel(plt.LightningModule):
         self.log("train/rouge_l", rouge_l, on_epoch=True, prog_bar=False)
 
     def configure_optimizers(self):
-        no_decay = ["bias", "LayerNorm.weight"]
-        params1, params2 = [], []
-        for layer in [self.embd_layer, self.reasoning, self.ans_infer]:
-            for n, p in layer.named_parameters():
-                if not any(nd in n for nd in no_decay):
-                    params1.append(p)
-                else:
-                    params2.append(p)
-        optimizer_grouped_parameters = [
-            {
-                "params": params1,
-                "weight_decay": 0.95,
-            },
-            {
-                "params": params2,
-                "weight_decay": 0.0,
-            },
-        ]
-        optimizer = AdamW(params=optimizer_grouped_parameters, lr=self.lr)
+        # no_decay = ["bias", "LayerNorm.weight"]
+        # params1, params2 = [], []
+        # for layer in [self.embd_layer, self.reasoning, self.ans_infer]:
+        #     for n, p in layer.named_parameters():
+        #         if not any(nd in n for nd in no_decay):
+        #             params1.append(p)
+        #         else:
+        #             params2.append(p)
+        # optimizer_grouped_parameters = [
+        #     {
+        #         "params": params1,
+        #         "weight_decay": 0.95,
+        #     },
+        #     {
+        #         "params": params2,
+        #         "weight_decay": 0.0,
+        #     },
+        # ]
+        # optimizer = AdamW(params=optimizer_grouped_parameters, lr=self.lr)
+        optimizer = AdamW(params=self.parameters(), lr=self.lr, weight_decay=0.01)
 
         n_training_steps = self.size_dataset_train // self.batch_size * self.n_epochs
         return {
@@ -316,16 +322,23 @@ class NarrativeModel(plt.LightningModule):
         ans1_mask = batch["ans1_mask"]
         loss = self.get_loss(output_mle, output_ot, ans1_ids, ans1_mask)
 
-        prediction = self.get_prediction(output_mle, ans1_ids, ans2_ids)
+        # prediction = self.get_prediction(output_mle, ans1_ids, ans2_ids)
 
         self.log("valid/loss", loss, on_step=True, on_epoch=True, prog_bar=False)
 
-        return {"loss": loss, "pred": prediction}
+        return {
+            "loss": loss,
+            "pred": (
+                output_mle.cpu().detach().numpy(),
+                ans1_ids.cpu().detach().numpy(),
+                ans2_ids.cpu().detach().numpy(),
+            ),
+        }
 
     def validation_epoch_end(self, outputs) -> None:
         preds = []
         for p in [out["pred"] for out in outputs]:
-            preds.extend(p)
+            preds.extend(self.get_prediction(p[0], p[1], p[2]))
 
         with open(self.path_valid_pred, "a+") as pred_file:
             json.dump(preds, pred_file, indent=2, ensure_ascii=False)

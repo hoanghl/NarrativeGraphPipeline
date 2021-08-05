@@ -8,7 +8,7 @@ import numpy as np
 import torch
 
 
-def ipot(a1: torch.Tensor, a2: torch.Tensor, beta=2, max_iter=1000, L=1):
+def ipot(a1: torch.Tensor, a2: torch.Tensor, beta=2, max_iter=100, L=1):
     """Calculate loss based on OT."""
 
     b, l_a, d_hid = a1.size()
@@ -89,8 +89,14 @@ def get_scores(ref: list, pred, eps=10e-8):
 
     # Calculate ROUGE-L
     scores = np.array(
-        [Rouge().get_scores(ref_, pred, avg=True)["rouge-l"]["f"] for ref_ in ref]
+        [
+            Rouge().get_scores(ref_, pred, avg=True)["rouge-l"]["f"] if ref != "" else 0
+            for ref_ in ref
+        ]
     )
+    # scores = np.array(
+    #     [Rouge().get_scores(ref_, pred, avg=True)["rouge-l"]["f"] for ref_ in ref]
+    # )
     rouge_l = np.mean(scores)
 
     return (
