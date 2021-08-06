@@ -22,7 +22,7 @@ defaults:
 PATH:
   utils: ""
   pretrained: ${PATH.utils}/bert-base-uncased
-  data: ${PATH.utils}/story/[SPLIT]/data_[SHARD].parquet
+  data: ${PATH.utils}/processed/story/[SPLIT]/data_[SHARD].parquet
   log: ${work_dir}/logs
 
 mode: train
@@ -40,6 +40,7 @@ l_a: 12
 n_c: 10
 
 trainer:
+  _target_: pytorch_lightning.Trainer
   gpus: 1
   min_epochs: 1
   max_epochs: 100
@@ -57,6 +58,7 @@ trainer:
   resume_from_checkpoint: ${PATH.log}/last_best.ckpt
 
 model:
+  _target_: model_utils.narrative_model.NarrativeModel
   batch_size: ${batch_size}
   l_q: ${l_q}
   l_c: ${l_c}
@@ -77,6 +79,7 @@ model:
   path_valid_pred: ${PATH.log}/valid_pred.json
 
 datamodule:
+  _target_: data_utils.narrative_datamodule.NarrativeDataModule
   batch_size: ${batch_size}
   sizes_dataset:
     train: 32747
@@ -114,7 +117,7 @@ logger:
     default_hp_metric: False
   wandb:
     _target_: pytorch_lightning.loggers.wandb.WandbLogger
-    project: "narrative_graph"
+    project: "narrative_weam"
     name: narrative_weam-${now:%b-%d:%H-%M}
     save_dir: "."
     offline: False # set True to store all logs only locally

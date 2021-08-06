@@ -163,10 +163,10 @@ class NarrativeModel(plt.LightningModule):
         self,
         q_ids,
         q_masks,
-        a_ids,
-        a_masks,
         c_ids,
         c_masks,
+        a1_ids=None,
+        a1_masks=None,
         cur_step=0,
         max_step=0,
         is_predict=False,
@@ -206,8 +206,8 @@ class NarrativeModel(plt.LightningModule):
             if is_predict
             else self.ans_infer.do_train(
                 Y=Y,
-                a_ids=a_ids,
-                a_masks=a_masks,
+                a_ids=a1_ids,
+                a_masks=a1_masks,
                 cur_step=cur_step,
                 max_step=max_step,
             )
