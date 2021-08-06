@@ -23,7 +23,7 @@ PATH:
   utils: ""
   raw: ${PATH.utils}/raw
   processed_contx: ${PATH.utils}/processed/proc_contx/[ID].json
-  data: ${PATH.utils}/processed/[SPLIT]/data_[SHARD].parquet
+  data: ${PATH.utils}/processed/story_v42/[SPLIT]/data_[SHARD].parquet
   pretrained: ${PATH.utils}/bert-base-uncased
   train_pred: ${work_dir}/logs/train_pred.json
   valid_pred: ${work_dir}/logs/valid_pred.json

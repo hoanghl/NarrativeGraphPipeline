@@ -46,7 +46,6 @@ class FineGrain(torch_nn.Module):
             bidirectional=True,
         )
         self.lin_attn = torch_nn.Linear(d_bert * 2, l_c)
-        # NOTE: In case loss keeps not decreasing, discard self.lin1
         self.lin1 = torch_nn.Sequential(
             torch_nn.Linear(d_bert, d_bert),
             torch_nn.Tanh(),
@@ -157,7 +156,7 @@ class FineGrain(torch_nn.Module):
         # [b, l_a, d_bert]
         if ot_loss:
             output = self.lin1(output)
-            # [b, l_a, d_hid]
+        # [b, l_a, d_hid]
 
         return output
 

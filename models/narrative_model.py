@@ -2,7 +2,7 @@ from typing import Any, Optional
 import json
 
 
-from transformers import AdamW, BertTokenizer, get_linear_schedule_with_warmup
+from transformers import AdamW, BertTokenizer
 import pytorch_lightning as plt
 import torch.nn.functional as torch_F
 import torch.nn as torch_nn
@@ -255,9 +255,9 @@ class NarrativeModel(plt.LightningModule):
         return {
             "loss": loss,
             "pred": (
-                output_mle.cpu().detach().numpy(),
-                ans1_ids.cpu().detach().numpy(),
-                ans2_ids.cpu().detach().numpy(),
+                output_mle.cpu().detach(),
+                ans1_ids.cpu().detach(),
+                ans2_ids.cpu().detach(),
             ),
         }
 
@@ -277,36 +277,43 @@ class NarrativeModel(plt.LightningModule):
         self.log("train/rouge_l", rouge_l, on_epoch=True, prog_bar=False)
 
     def configure_optimizers(self):
-        # no_decay = ["bias", "LayerNorm.weight"]
-        # params1, params2 = [], []
-        # for layer in [self.embd_layer, self.reasoning, self.ans_infer]:
-        #     for n, p in layer.named_parameters():
-        #         if not any(nd in n for nd in no_decay):
-        #             params1.append(p)
-        #         else:
-        #             params2.append(p)
-        # optimizer_grouped_parameters = [
-        #     {
-        #         "params": params1,
-        #         "weight_decay": 0.95,
-        #     },
-        #     {
-        #         "params": params2,
-        #         "weight_decay": 0.0,
-        #     },
-        # ]
-        # optimizer = AdamW(params=optimizer_grouped_parameters, lr=self.lr)
-        optimizer = AdamW(params=self.parameters(), lr=self.lr, weight_decay=0.01)
-
-        n_training_steps = self.size_dataset_train // self.batch_size * self.n_epochs
+        no_decay = ["bias", "LayerNorm.weight"]
+        params1, params2 = [], []
+        for layer in [self.embd_layer, self.reasoning, self.ans_infer]:
+            for n, p in layer.named_parameters():
+                if not any(nd in n for nd in no_decay):
+                    params1.append(p)
+                else:
+                    params2.append(p)
+        optimizer_grouped_parameters = [
+            {
+                "params": params1,
+                "weight_decay": 0.95,
+            },
+            {
+                "params": params2,
+                "weight_decay": 0.0,
+            },
+        ]
+        optimizer = AdamW(params=optimizer_grouped_parameters, lr=self.lr)
+        # optimizer = AdamW(params=self.parameters(), lr=self.lr, weight_decay=1e-2)
         return {
             "optimizer": optimizer,
-            "lr_scheduler": get_linear_schedule_with_warmup(
-                optimizer,
-                num_warmup_steps=int(n_training_steps * self.warmup_rate),
-                num_training_steps=n_training_steps,
+            "lr_scheduler": torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer, T_max=60, eta_min=0
             ),
         }
+        # optimizer = AdamW(params=self.parameters(), lr=self.lr, weight_decay=0.01)
+
+        # n_training_steps = self.size_dataset_train // self.batch_size * self.n_epochs
+        # return {
+        #     "optimizer": optimizer,
+        #     "lr_scheduler": get_linear_schedule_with_warmup(
+        #         optimizer,
+        #         num_warmup_steps=int(n_training_steps * self.warmup_rate),
+        #         num_training_steps=n_training_steps,
+        #     ),
+        # }
 
     #########################################
     # FOR PREDICTION PURPOSE
@@ -329,9 +336,9 @@ class NarrativeModel(plt.LightningModule):
         return {
             "loss": loss,
             "pred": (
-                output_mle.cpu().detach().numpy(),
-                ans1_ids.cpu().detach().numpy(),
-                ans2_ids.cpu().detach().numpy(),
+                output_mle.cpu().detach(),
+                ans1_ids.cpu().detach(),
+                ans2_ids.cpu().detach(),
             ),
         }
 
