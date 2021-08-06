@@ -149,7 +149,7 @@ class NarrativeModel(plt.LightningModule):
 
         return prediction
 
-    def get_loss(self, output_mle, output_ot, a_ids, a_masks, gamma=0.05):
+    def get_loss(self, output_mle, output_ot, a_ids, a_masks, gamma=0.5):
         # output_mle: [b, d_vocab, l_a-1]
         # output_ot: [b, l_a-1, d_hid]
         # a_ids: [b, l_a]

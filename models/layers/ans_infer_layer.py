@@ -161,14 +161,12 @@ class BertDecoder(torch_nn.Module):
         # [b, l_a]
         outputs = ids2dist(outputs, self.d_vocab)
         # [b, l_a, d_vocab]
-        outputs = outputs[:, :-1]
-        # [b, l_a - 1, d_vocab]
 
         ## Get output for OT
-        output_ot = self.embd_layer.get_output_ot(outputs)
+        output_ot = self.embd_layer.get_output_ot(outputs)[:, :-1]
         # [b, l_a - 1, d_hid]
 
-        output_mle = outputs.transpose(1, 2)
+        output_mle = outputs[:, :-1].transpose(1, 2)
         # [b, d_vocab, l_a - 1]
 
         return output_mle, output_ot
@@ -176,6 +174,10 @@ class BertDecoder(torch_nn.Module):
 
 def ids2dist(outputs, d_vocab):
     indices = outputs.unsqueeze(-1)
-    a = torch.full((*outputs.size(), d_vocab), 1e-6)
-    a.scatter_(dim=-1, index=indices, src=torch.full(indices.size(), 0.99))
+    a = torch.full((*outputs.size(), d_vocab), 1e-6, device=outputs.device)
+    a.scatter_(
+        dim=-1,
+        index=indices,
+        src=torch.full(indices.size(), 0.99, device=outputs.device),
+    )
     return a

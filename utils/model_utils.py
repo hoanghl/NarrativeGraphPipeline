@@ -131,7 +131,6 @@ class GeneratorHugging(GenerationMixin):
         self.pad_token_id = pad_token_id
         self.bos_token_id = bos_token_id
         self.eos_token_id = eos_token_id
-
         self.model = model
 
         ############
@@ -236,14 +235,16 @@ class GeneratorHugging(GenerationMixin):
 
         if input_ids is None:
             # init `input_ids` with bos_token_id
-            input_ids = (
-                torch.ones((batch_size * num_beams, 1), dtype=torch.long)
-                * self.bos_token_id
+            input_ids = torch.full(
+                (batch_size * num_beams, 1),
+                self.bos_token_id,
+                dtype=torch.long,
+                device=encoder_outputs.device,
             )
 
         batch_beam_size, cur_len = input_ids.shape
 
-        beam_scores = torch.zeros((batch_size, num_beams), dtype=torch.float)
+        beam_scores = torch.zeros((batch_size, num_beams), dtype=torch.float, device=encoder_outputs.device)
         beam_scores = beam_scores.view((batch_size * num_beams,))
 
         while cur_len < self.max_length:
