@@ -9,13 +9,13 @@ transformers.logging.set_verbosity_error()
 class BertBasedEmbedding(torch_nn.Module):
     """Embed and generate question-aware c"""
 
-    def __init__(self, d_bert, d_hid, path_bert):
+    def __init__(self, d_bert, d_hid, path_pretrained):
         super().__init__()
 
         self.d_bert = d_bert
 
         ## Modules for embedding
-        self.bert_emb = BertModel.from_pretrained(path_bert)
+        self.bert_emb = BertModel.from_pretrained(path_pretrained)
         self.lin1 = torch_nn.Linear(d_bert, d_hid)
 
     def forward(self):
@@ -54,18 +54,6 @@ class BertBasedEmbedding(torch_nn.Module):
 
         return q, c
 
-    def get_w_embd(self, input_ids=None, input_embds=None):
-        # input_ids : [b, len_]
-
-        assert torch.is_tensor(input_ids) or torch.is_tensor(
-            input_embds
-        ), "One of two must not be None"
-
-        if torch.is_tensor(input_ids):
-            return self.bert_emb.embeddings.word_embeddings(input_ids)
-        return input_embds @ self.bert_emb.embeddings.word_embeddings.weight
-        # [b, len_, d_bert]
-
     def encode_ans(self, input_ids=None, input_embds=None, input_masks=None):
         # input_ids : [b, len_]
         # input_embds : [b, len_, d_bert]
@@ -96,9 +84,10 @@ class BertBasedEmbedding(torch_nn.Module):
     def get_output_ot(self, output):
         # output: [b, l_a - 1, d_vocab]
 
-        output_ot = output @ self.bert_emb.embeddings.word_embeddings.weight
+        output = output @ self.bert_emb.embeddings.word_embeddings.weight
         # [b, l_a - 1, d_bert]
-        output_ot = self.lin1(output_ot)
+
+        output = self.lin1(output)
         # [b, l_a - 1, d_hid]
 
-        return output_ot
+        return output

@@ -4,6 +4,13 @@
 
 ## July 23 2021, 16:51
 
+- Use data **v4.3**: change value of many fields
+- Refactor code to follow new template
+- Use **BeamHugging** as predicting instead of **traditional topk**
+- Reduce _n_shards_ to 4
+
+## July 23 2021, 16:51
+
 - Use new _Reasoning_ moddule
 - Organize project structure
 - Still use MLE with OT loss, use hard softmax instead

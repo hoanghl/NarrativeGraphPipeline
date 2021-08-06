@@ -1,37 +1,48 @@
 # @package _global_
 
-##########################################
-###### GENERAL CONFIGURATIONS
-##########################################
-PATH:
-  utils: ""
-  raw: ${PATH.utils}/raw
-  bert: ${PATH.utils}/bert-base-uncased
-  processed_contx: ${PATH.utils}/processed/proc_contx/[ID].json
-  data: data/[SPLIT]/data_[SHARD].parquet
-  log: logs
-
-mode: train
+##################################
+## GENERAL CONFIGURATIONS
+##################################
+work_dir: ${hydra:runtime.cwd}
+data_dir: ${work_dir}/data/
 print_config: True
 ignore_warnings: True
+hydra:
+  run:
+    dir: logs/runs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+
+defaults:
+  # enable color logging
+  - override hydra/hydra_logging: colorlog
+  - override hydra/job_logging: colorlog
+
+##################################
+## CONFIGURATIONS for components
+##################################
+PATH:
+  utils: ""
+  pretrained: ${PATH.utils}/bert-base-uncased
+  data: ${PATH.utils}/story/[SPLIT]/data_[SHARD].parquet
+  log: ${work_dir}/logs
+
+mode: train
 
 batch_size: 5
 n_workers: 4
-n_shards: 32
+n_shards: 4
 
 ##########################################
 ###### CONFIGURATIONS FOR EACH COMPONENT
 ##########################################
-l_q: 42
-l_c: 250
-l_a: 20
+l_q: 35
+l_c: 180
+l_a: 12
 n_c: 10
-l_c_contx_process: 120
 
 trainer:
   gpus: 1
   min_epochs: 1
-  max_epochs: 1000
+  max_epochs: 100
   auto_lr_find: False
   terminate_on_nan: True
   log_every_n_steps: 40
@@ -46,6 +57,7 @@ trainer:
   resume_from_checkpoint: ${PATH.log}/last_best.ckpt
 
 model:
+  batch_size: ${batch_size}
   l_q: ${l_q}
   l_c: ${l_c}
   l_a: ${l_a}
@@ -59,7 +71,7 @@ model:
   dropout: 0.2
   beam_size: 20
   n_gram_beam: 8
-  path_bert: ${PATH.utils}/bert-base-uncased
+  path_pretrained: ${PATH.pretrained}
   path_pred: ${PATH.log}/pred.json
   path_train_pred: ${PATH.log}/train_pred.json
   path_valid_pred: ${PATH.log}/valid_pred.json
@@ -93,10 +105,23 @@ callbacks:
   #   mode: max
 
 logger:
-  Tensorboard:
+  tensorboard:
     _target_: pytorch_lightning.loggers.tensorboard.TensorBoardLogger
     save_dir: ${PATH.log}/tensorboard/
     name: default
     version: null
     log_graph: False
     default_hp_metric: False
+  wandb:
+    _target_: pytorch_lightning.loggers.wandb.WandbLogger
+    project: "narrative_graph"
+    name: narrative_weam-${now:%b-%d:%H-%M}
+    save_dir: "."
+    offline: False # set True to store all logs only locally
+    id: null # pass correct id to resume experiment!
+    # entity: ""  # set to name of your wandb team or just remove it
+    log_model: False
+    prefix: ""
+    job_type: "train"
+    group: ""
+    tags: []

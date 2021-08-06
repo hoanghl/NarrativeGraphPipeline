@@ -1,7 +1,7 @@
 from torch.utils.data import DataLoader
 import pytorch_lightning as plt
 
-from utils.utils import CustomSampler
+from utils.datamodule_utils import CustomSampler
 from data_utils.dataset import NarrativeDataset
 
 
