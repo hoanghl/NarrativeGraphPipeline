@@ -71,9 +71,6 @@ model:
   d_bert: 768
   d_vocab: 30522
   d_graph: 2048
-  n_epochs: ${trainer.max_epochs}
-  size_dataset_train: ${datamodule.sizes_dataset.train}
-  warmup_rate: 0.2
   lr: 1e-5
   switch_frequency: 5
   beam_size: 20

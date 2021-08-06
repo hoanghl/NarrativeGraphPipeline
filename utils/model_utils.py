@@ -1,6 +1,7 @@
 import re
 
 from transformers.generation_utils import *
+import torch.nn.functional as F
 from rouge import Rouge
 from nltk.translate.meteor_score import meteor_score
 from nltk.translate.bleu_score import sentence_bleu
@@ -107,15 +108,16 @@ def get_scores(ref: list, pred, eps=10e-8):
     )
 
 
-class BeamSearchHuggingface(GenerationMixin):
+class GeneratorHugging(GenerationMixin):
     def __init__(
         self,
-        batch_size: int = 2,
-        min_length: int = 5,
-        max_length: int = 20,
-        num_beams: int = 10,
-        temperature: int = 1,
-        no_repeat_ngram_size: int = 5,
+        batch_size,
+        min_length,
+        max_length,
+        num_beams,
+        temperature,
+        no_repeat_ngram_size,
+        device,
         model: Any = None,
         pad_token_id: Optional[int] = 0,
         bos_token_id: Optional[int] = 1,
@@ -140,6 +142,7 @@ class BeamSearchHuggingface(GenerationMixin):
             max_length=max_length,
             num_beams=num_beams,
             do_early_stopping=False,
+            device=device,
         )
 
         self.logits_processor = LogitsProcessorList(
@@ -246,7 +249,7 @@ class BeamSearchHuggingface(GenerationMixin):
         while cur_len < self.max_length:
             model_inputs = self.prepare_inputs_for_generation(input_ids, **model_kwargs)
             outputs = self.model(**model_inputs)
-            next_token_logits = outputs.logits[:, -1, :]
+            next_token_logits = outputs[:, -1, :]
 
             # hack: adjust tokens for Marian. For Marian we have to make sure that the `pad_token_id`
             # cannot be generated both before and after the `F.log_softmax` operation.
@@ -321,9 +324,9 @@ class BeamSearchHuggingface(GenerationMixin):
             )
             cur_len = cur_len + 1
 
-            model_kwargs = self._update_model_kwargs_for_generation(
-                outputs, model_kwargs, is_encoder_decoder=is_encoder_decoder
-            )
+            # model_kwargs = self._update_model_kwargs_for_generation(
+            #     outputs, model_kwargs, is_encoder_decoder=is_encoder_decoder
+            # )
 
             if self.beam_scorer.is_done:
                 break

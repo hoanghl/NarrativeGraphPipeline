@@ -3,20 +3,23 @@ import torch.nn as torch_nn
 import torch
 import numpy as np
 
-from utils.model_utils import GeneratorOwn
+from utils.model_utils import GeneratorHugging
 
 
 class BertDecoder(torch_nn.Module):
     def __init__(
         self,
+        batch_size,
         l_a,
         d_bert,
         d_vocab,
         cls_tok_id,
         sep_tok_id,
+        pad_tok_id,
         beam_size,
         n_gram_beam,
         embd_layer,
+        device,
     ):
         super().__init__()
 
@@ -24,6 +27,7 @@ class BertDecoder(torch_nn.Module):
         self.cls_tok_id = cls_tok_id
         self.sep_tok_id = sep_tok_id
         self.n_gram_beam = n_gram_beam
+        self.d_vocab = d_vocab
         self.l_a = l_a
         self.t = -1
 
@@ -40,6 +44,19 @@ class BertDecoder(torch_nn.Module):
             torch_nn.Linear(d_bert, d_bert),
             torch_nn.GELU(),
             torch_nn.Linear(d_bert, d_vocab),
+        )
+        self.generator = GeneratorHugging(
+            batch_size=batch_size,
+            max_length=l_a,
+            min_length=1,
+            num_beams=beam_size,
+            temperature=0.8,
+            no_repeat_ngram_size=5,
+            model=self.generate,
+            pad_token_id=pad_tok_id,
+            bos_token_id=cls_tok_id,
+            eos_token_id=sep_tok_id,
+            device=device,
         )
 
     def forward(self, Y: torch.Tensor, ans_ids: torch.Tensor, ans_mask: torch.Tensor):
@@ -122,92 +139,43 @@ class BertDecoder(torch_nn.Module):
 
         return ans_ids[:, ith].unsqueeze(1) if self.t == 0 else output
 
-    def do_predict(self, Y):
-        # NOTE: This belongs to BeamSearchHugging and therefore is commented
-        # Y_ = Y.repeat_interleave(self.beam_size, dim=0)
-        # # [b_, l_a, d_bert]
+    def generate(self, decoder_input_ids, encoder_outputs):
+        # decoder_input_ids: [batch_beam, l_]
+        # encoder_outputs  : [batch_beam, l_c, d_]
 
-        # generator = BeamSearchHuggingface(
-        #     batch_size=b,
-        #     max_length=self.l_a,
-        #     num_beams=self.beam_size,
-        #     temperature=self.temperature,
-        #     no_repeat_ngram_size=self.n_gram_beam,
-        #     model=self.generate,
-        #     pad_token_id=self.bert_tokenizer.pad_token_id,
-        #     bos_token_id=self.bert_tokenizer.cls_token_id,
-        #     eos_token_id=self.bert_tokenizer.sep_token_id,
-        # )
-
-        # outputs = generator.beam_sample(None, Y_)
-
-        b = Y.size(0)
-
-        output_ids = []
-
-        beam_search = GeneratorOwn(
-            beam_size=self.beam_size,
-            init_tok=self.cls_tok_id,
-            stop_tok=self.sep_tok_id,
-            max_len=self.l_a,
-            model=self.generate_own,
-            no_repeat_ngram_size=self.n_gram_beam,
+        decoder_input_mask = torch.ones(
+            decoder_input_ids.shape, device=encoder_outputs.device
         )
 
-        for b_ in range(b):
-            indices = beam_search.search(encoder_outputs=Y[b_, :, :])
-            output_ids.append(indices)
-        output_ids = torch.tensor(output_ids, device=Y.device).long()[:, 1:]
-        # [b, l_a]
+        output = self(encoder_outputs, decoder_input_ids, decoder_input_mask)
+        # [b_, len_, d_vocab]
 
-        output_mask = torch.zeros(output_ids.size(), device=Y.device)
-        output = self(Y=Y, ans_ids=output_ids, ans_mask=output_mask)
+        return output
+
+    def do_predict(self, Y):
+        # Y       : [b, l_a, d_bert]
+        Y_ = Y.repeat_interleave(self.beam_size, dim=0)
+        # [b_, l_a, d_bert]
+
+        outputs = self.generator.beam_sample(None, Y_)
+        # [b, l_a]
+        outputs = ids2dist(outputs, self.d_vocab)
+        # [b, l_a, d_vocab]
+        outputs = outputs[:, :-1]
+        # [b, l_a - 1, d_vocab]
 
         ## Get output for OT
-        output_ot = self.embd_layer.get_output_ot(torch.softmax(output, dim=-1))[:, :-1]
+        output_ot = self.embd_layer.get_output_ot(outputs)
         # [b, l_a - 1, d_hid]
 
-        output_mle = output[:, :-1].transpose(1, 2)
+        output_mle = outputs.transpose(1, 2)
         # [b, d_vocab, l_a - 1]
 
         return output_mle, output_ot
 
-    def generate_own(self, decoder_input_ids, encoder_outputs):
-        # decoder_input_ids: [l_]
-        # encoder_outputs  : [l_a, d_bert]
 
-        decoder_input_ids = (
-            torch.tensor(decoder_input_ids, device=encoder_outputs.device)
-            .long()
-            .unsqueeze(0)
-        )
-        decoder_input_mask = torch.ones(
-            decoder_input_ids.size(), device=encoder_outputs.device
-        )
-        encoder_outputs = encoder_outputs.unsqueeze(0)
-
-        output = self(encoder_outputs, decoder_input_ids, decoder_input_mask)
-        # [1, l_, d_vocab]
-
-        output = output.squeeze(0)
-        # [l_, d_vocab]
-
-        return output
-
-    # NOTE: This belongs to BeamSearchHugging and therefore is commented
-    # def generate(self, decoder_input_ids, encoder_outputs):
-    #     # decoder_input_ids: [b_, seq_len<=200]
-    #     # encoder_outputs  : [b_, len_, d_bert]
-
-    #     b_, seq_len = decoder_input_ids.shape
-
-    #     decoder_input_mask = torch.ones((b_, seq_len))
-    #     decoder_input_embd = self.embd_layer.encode_ans(
-    #         decoder_input_ids, decoder_input_mask
-    #     )
-    #     # [b_, seq=*, d_bert]
-
-    #     output = self.ans_infer(encoder_outputs, decoder_input_embd, decoder_input_mask)
-    #     # [b_, seq=*, d_vocab]
-
-    #     return Seq2SeqLMOutput(logits=output)
+def ids2dist(outputs, d_vocab):
+    indices = outputs.unsqueeze(-1)
+    a = torch.full((*outputs.size(), d_vocab), 1e-6)
+    a.scatter_(dim=-1, index=indices, src=torch.full(indices.size(), 0.99))
+    return a

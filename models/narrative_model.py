@@ -4,7 +4,6 @@ import json
 
 from transformers import AdamW, BertTokenizer
 import pytorch_lightning as plt
-import torch.nn.functional as torch_F
 import torch.nn as torch_nn
 import torch
 
@@ -29,9 +28,6 @@ class NarrativeModel(plt.LightningModule):
         d_bert,
         d_vocab,
         d_graph,
-        n_epochs,
-        size_dataset_train,
-        warmup_rate,
         lr,
         switch_frequency,
         beam_size,
@@ -47,9 +43,6 @@ class NarrativeModel(plt.LightningModule):
 
         self.d_vocab = d_vocab
         self.batch_size = batch_size
-        self.n_epochs = n_epochs
-        self.size_dataset_train = size_dataset_train
-        self.warmup_rate = warmup_rate
         self.lr = lr
         self.beam_size = beam_size
         self.n_gram_beam = n_gram_beam
@@ -84,14 +77,17 @@ class NarrativeModel(plt.LightningModule):
             n_edges=n_edges,
         )
         self.ans_infer = BertDecoder(
+            batch_size=batch_size,
             l_a=l_a,
             d_bert=d_bert,
             d_vocab=d_vocab,
             cls_tok_id=self.bert_tokenizer.cls_token_id,
-            sep_tok_id=self.bert_tokenizer.sep_token,
+            sep_tok_id=self.bert_tokenizer.sep_token_id,
+            pad_tok_id=self.bert_tokenizer.pad_token_id,
             beam_size=beam_size,
             n_gram_beam=n_gram_beam,
             embd_layer=self.embd_layer,
+            device=self.device,
         )
 
         ## Freeeze some parameters
@@ -138,7 +134,7 @@ class NarrativeModel(plt.LightningModule):
         )
 
     def get_prediction(self, output_mle, a1_ids, a2_ids):
-        _, prediction = torch.topk(torch_F.log_softmax(output_mle, dim=1), 1, dim=1)
+        _, prediction = torch.topk(output_mle, 1, dim=1)
 
         prediction = [
             {
@@ -244,13 +240,6 @@ class NarrativeModel(plt.LightningModule):
         loss = self.get_loss(output_mle, output_ot, ans1_ids, ans1_mask)
 
         self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=False)
-        self.log(
-            "train/sampling",
-            self.ans_infer.t,
-            on_step=True,
-            on_epoch=False,
-            prog_bar=False,
-        )
 
         return {
             "loss": loss,
@@ -296,29 +285,17 @@ class NarrativeModel(plt.LightningModule):
             },
         ]
         optimizer = AdamW(params=optimizer_grouped_parameters, lr=self.lr)
-        # optimizer = AdamW(params=self.parameters(), lr=self.lr, weight_decay=1e-2)
+
         return {
             "optimizer": optimizer,
             "lr_scheduler": torch.optim.lr_scheduler.CosineAnnealingLR(
                 optimizer, T_max=60, eta_min=0
             ),
         }
-        # optimizer = AdamW(params=self.parameters(), lr=self.lr, weight_decay=0.01)
-
-        # n_training_steps = self.size_dataset_train // self.batch_size * self.n_epochs
-        # return {
-        #     "optimizer": optimizer,
-        #     "lr_scheduler": get_linear_schedule_with_warmup(
-        #         optimizer,
-        #         num_warmup_steps=int(n_training_steps * self.warmup_rate),
-        #         num_training_steps=n_training_steps,
-        #     ),
-        # }
 
     #########################################
     # FOR PREDICTION PURPOSE
     #########################################
-
     def validation_step(self, batch: Any, batch_idx: int):
         output_mle, output_ot = self(**batch, is_predict=True)
         # output_ot: [b, l_a - 1, d_hid]
@@ -329,9 +306,7 @@ class NarrativeModel(plt.LightningModule):
         ans1_mask = batch["ans1_mask"]
         loss = self.get_loss(output_mle, output_ot, ans1_ids, ans1_mask)
 
-        # prediction = self.get_prediction(output_mle, ans1_ids, ans2_ids)
-
-        self.log("valid/loss", loss, on_step=True, on_epoch=True, prog_bar=False)
+        self.log("valid/loss", loss, on_step=False, on_epoch=True, prog_bar=False)
 
         return {
             "loss": loss,
@@ -367,70 +342,35 @@ class NarrativeModel(plt.LightningModule):
         batch_idx: int,
         dataloader_idx: Optional[int],
     ) -> Any:
-        ques_ids = batch["ques_ids"]
-        ques_mask = batch["ques_mask"]
+        output_mle, _ = self(**batch, is_predict=True)
+        # output_ot: [b, l_a - 1, d_hid]
+        # output_mle: [b, d_vocab, l_a - 1]
+
         ans1_ids = batch["ans1_ids"]
         ans2_ids = batch["ans2_ids"]
-        context_ids = batch["context_ids"]
-        context_mask = batch["context_mask"]
 
-        prediction = self(
-            ques_ids=ques_ids,
-            ques_mask=ques_mask,
-            context_ids=context_ids,
-            context_mask=context_mask,
-        )
-
-        prediction = [
-            {
-                "pred": " ".join(self.bert_tokenizer.convert_ids_to_tokens(pred_)),
-                "ref": [
-                    " ".join(self.bert_tokenizer.convert_ids_to_tokens(ans1_)),
-                    " ".join(self.bert_tokenizer.convert_ids_to_tokens(ans2_)),
-                ],
-            }
-            for pred_, ans1_, ans2_ in zip(prediction.squeeze(1), ans1_ids, ans2_ids)
-        ]
-
-        return prediction
+        return {
+            "pred": (
+                output_mle.cpu().detach(),
+                ans1_ids.cpu().detach(),
+                ans2_ids.cpu().detach(),
+            ),
+        }
 
     def on_predict_batch_end(
         self, outputs: Optional[Any], batch: Any, batch_idx: int, dataloader_idx: int
     ) -> None:
 
-        #######################
-        # Calculate metrics
-        #######################
-        n_samples = 0
-        bleu_1, bleu_4, meteor, rouge_l = 0, 0, 0, 0
-        for pair in outputs:
-            try:
-                bleu_1_, bleu_4_, meteor_, rouge_l_ = self.get_scores(**pair)
-            except ValueError:
-                bleu_1_, bleu_4_, meteor_, rouge_l_ = 0, 0, 0, 0
+        preds = []
+        for p in [out["pred"] for out in outputs]:
+            preds.extend(self.get_prediction(p[0], p[1], p[2]))
 
-            bleu_1 += bleu_1_
-            bleu_4 += bleu_4_
-            meteor += meteor_
-            rouge_l += rouge_l_
+        with open(self.path_valid_pred, "a+") as pred_file:
+            json.dump(preds, pred_file, indent=2, ensure_ascii=False)
 
-            n_samples += 1
+        bleu_1, bleu_4, meteor, rouge_l = self.get_score_from_outputs(preds)
 
-        #######################
-        # Log prediction and metrics
-        #######################
-        with open(self.path_pred, "a+") as pred_file:
-            json.dump(
-                {
-                    "metrics": {
-                        "bleu_1": bleu_1 / n_samples,
-                        "bleu_4": bleu_4 / n_samples,
-                        "meteor": meteor / n_samples,
-                        "rouge_l": rouge_l / n_samples,
-                    },
-                    "predictions": outputs,
-                },
-                pred_file,
-                indent=2,
-                ensure_ascii=False,
-            )
+        self.log("predict/bleu_1", bleu_1, on_epoch=True, prog_bar=False)
+        self.log("predict/bleu_4", bleu_4, on_epoch=True, prog_bar=False)
+        self.log("predict/meteor", meteor, on_epoch=True, prog_bar=False)
+        self.log("predict/rouge_l", rouge_l, on_epoch=True, prog_bar=False)
