@@ -1,10 +1,16 @@
+from collections import defaultdict, Counter
+from itertools import chain
+from math import log
 import re
 
-from rouge import Rouge
+
+from transformers import BertModel
 from nltk.translate.meteor_score import meteor_score
 from nltk.translate.bleu_score import sentence_bleu
 from transformers.generation_utils import *
+from rouge import Rouge
 import numpy as np
+import torch.nn as torch_nn
 import torch
 
 
@@ -643,3 +649,130 @@ class GeneratorOwn:
         # topBeam_tok  = top_tok[indx]
 
         return topBeam_dist, topBeam_tok
+
+
+class BertLoss(torch_nn.Module):
+    def __init__(self, path_pretrained, path_saved_bert, d_vocab):
+        super().__init__()
+        self.bert = BertModel.from_pretrained(path_pretrained)
+        self.bert.load_state_dict(torch.load(path_saved_bert))
+
+        self.d_vocab = d_vocab
+
+    def encode(self, a_ids, a_masks, a_=None):
+        # a_ids: [b, l_a]
+        # a_masks: [b, l_a]
+
+        if a_ is None:
+            a = a_ids * a_masks
+            a = self.conv_ids2embd(a)
+        else:
+            a = a_
+        # [b, l_a, d_vocab]
+        a = a @ self.bert.embeddings.word_embeddings.weight
+        # [b, l_a, d_bert]
+
+        return a
+
+    def conv_ids2embd(self, a):
+        # a: [b, l_]
+        b, l_ = a.size()
+        indices = a.unsqueeze(-1)
+        a = torch.full((b, l_, self.d_vocab), 1e-6)
+        a.scatter_(dim=-1, index=indices, src=torch.full(indices.size(), 0.99))
+
+        return a
+
+    def cosine_sim(self, a, p):
+        # a, p: [b, l_a, d_bert]
+
+        l_a = a.size(1)
+
+        norm_a = torch.linalg.norm(a, dim=-1).unsqueeze(-1).repeat(1, 1, l_a)
+        norm_p = torch.linalg.norm(p, dim=-1).unsqueeze(1).repeat(1, l_a, 1)
+        m = a @ p.transpose(1, 2)
+        cos_sim = m * 1 / (norm_a * norm_p)
+
+        return cos_sim
+
+    def get_idf_weights(self, a1_ids, a2_ids, p_ids):
+        idf_count = Counter()
+        num_docs = 2
+
+        idf_count.update(chain.from_iterable(map(set, [a1_ids, a2_ids])))
+
+        idf_dict = defaultdict(lambda: log((num_docs + 1) / (1)))
+        idf_dict.update(
+            {idx: log((num_docs + 1) / (c + 1)) for (idx, c) in idf_count.items()}
+        )
+
+        idf_weights_a1 = [
+            log((num_docs + 1) / (idf_count[a_] + 1)) if a_ != 0 else 0 for a_ in a1_ids
+        ]
+        idf_weights_a2 = [
+            log((num_docs + 1) / (idf_count[a_] + 1)) if a_ != 0 else 0 for a_ in a2_ids
+        ]
+        idf_weights_p = [
+            log((num_docs + 1) / (idf_count[a_] + 1)) if a_ != 0 else 0 for a_ in p_ids
+        ]
+
+        return idf_weights_a1, idf_weights_a2, idf_weights_p
+
+    def forward(self, pred, a1_ids, a1_masks, a2_ids, a2_masks):
+        # pred: [b, l_a, d_vocab]
+        # a1_ids, a1_masks: [b, l_a]
+        # a2_ids, a2_masks: [b, l_a]
+
+        b = pred.size(0)
+        device = pred.device
+        dtype = torch.float
+
+        ## Encode: convert from ids to BERT embedding form
+        a1, a2 = self.encode(a1_ids, a1_masks), self.encode(a2_ids, a2_masks)
+        p = self.encode(None, None, pred)
+        # a1, a2, p: [b, l_a, d_bert]
+
+        ## Calculate Cosine Similarity matrix
+        cos_sim1 = self.cosine_sim(a1, p)
+        cos_sim2 = self.cosine_sim(a2, p)
+        # cos_sim1, cos_sim2: [b, l_a, l_a]
+
+        ## Calculate R and P and F1
+        _, p_ids = torch.topk(pred, k=1)
+
+        idf_weights_a1, idf_weights_a2, idf_weights_p = [], [], []
+        for b_ in range(b):
+            a1_, a2_, p_ = (
+                a1_ids[b_].tolist(),
+                a2_ids[b_].tolist(),
+                p_ids.squeeze(-1)[b_].tolist(),
+            )
+            ret = self.get_idf_weights(a1_, a2_, p_)
+            idf_weights_a1.append(ret[0])
+            idf_weights_a2.append(ret[1])
+            idf_weights_p.append(ret[2])
+        w_a1 = torch.tensor(idf_weights_a1, device=device, dtype=dtype)
+        w_a2 = torch.tensor(idf_weights_a2, device=device, dtype=dtype)
+        w_p = torch.tensor(idf_weights_p, device=device, dtype=dtype)
+
+        R1 = cos_sim1.max(dim=-1)[0] * w_a1
+        R1 = R1.sum(dim=-1) / w_a1.sum(dim=-1)
+        # [b]
+        R2 = cos_sim2.max(dim=-1)[0] * w_a2
+        R2 = R2.sum(dim=-1) / w_a2.sum(dim=-1)
+        # [b]
+        R = (R1 + R2) / 2
+
+        P1 = cos_sim1.max(dim=-2)[0] * w_p
+        P1 = P1.sum(dim=-1) / w_p.sum(dim=-1)
+        # [b]
+        P2 = cos_sim2.max(dim=-2)[0] * w_p
+        P2 = P2.sum(dim=-1) / w_p.sum(dim=-1)
+        # [b]
+        P = (P1 + P2) / 2
+
+        F1 = 2 * (P * R) / (P + R)
+        # [b]
+
+        F1_loss = torch.mean(F1)
+        return 20 * (1 - F1_loss)

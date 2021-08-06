@@ -11,7 +11,7 @@ from data_utils.narrative_datamodule import NarrativeDataModule
 from model_utils.layers.reasoning_layer import Reasoning
 from model_utils.layers.bertbasedembd_layer import BertBasedEmbedding
 from model_utils.layers.ans_infer_layer import Decoder
-from utils.model_utils import ipot, get_scores
+from utils.model_utils import ipot, get_scores, BertLoss
 
 EPSILON = 10e-10
 
@@ -33,6 +33,7 @@ class NarrativeModel(plt.LightningModule):
         beam_size,
         n_gram_beam,
         path_pretrained,
+        path_saved_bert,
         path_pred,
         path_train_pred,
         path_valid_pred,
@@ -93,8 +94,14 @@ class NarrativeModel(plt.LightningModule):
         #############################
         # Define things
         #############################
-        self.criterion = torch_nn.CrossEntropyLoss(
-            ignore_index=self.bert_tokenizer.pad_token_id
+        # NOTE: This is commented for experiment
+        # self.criterion = torch_nn.CrossEntropyLoss(
+        #     ignore_index=self.bert_tokenizer.pad_token_id
+        # )
+        self.criterion = BertLoss(
+            path_pretrained=path_pretrained,
+            path_saved_bert=path_saved_bert,
+            d_vocab=d_vocab,
         )
 
     ####################################################################
@@ -163,10 +170,10 @@ class NarrativeModel(plt.LightningModule):
         self,
         q_ids,
         q_masks,
-        a_ids,
-        a_masks,
         c_ids,
         c_masks,
+        a1_ids=None,
+        a1_masks=None,
         cur_step=0,
         max_step=0,
         is_predict=False,
@@ -218,24 +225,33 @@ class NarrativeModel(plt.LightningModule):
         a1_ids = batch["a1_ids"]
         a2_ids = batch["a2_ids"]
         a1_masks = batch["a1_masks"]
+        a2_masks = torch.ones(
+            a2_ids.size(), dtype=a1_masks.dtype, device=a1_masks.device
+        )
 
-        output_mle, output_ot = self(
+        output = self(
             **batch,
             cur_step=batch_idx,
             max_step=self.datamodule.data_train.size_dataset
             // self.datamodule.batch_size,
         )
-        # output_ot: [b, l_a - 1, d_hid]
-        # output_mle: [b, d_vocab, l_a - 1]
-
-        loss = self.get_loss(output_mle, output_ot, a1_ids[:, 1:], a1_masks[:, 1:])
+        # output: [b, l_a, d_hid]
+        # NOTE: This is commented for testing
+        # loss = self.get_loss(output_mle, output_ot, a1_ids[:, 1:], a1_masks[:, 1:])
+        loss = self.criterion(
+            pred=output,
+            a1_ids=a1_ids,
+            a1_masks=a1_masks,
+            a2_ids=a2_ids,
+            a2_masks=a2_masks,
+        )
 
         self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=False)
 
         return {
             "loss": loss,
             "pred": (
-                output_mle.cpu().detach(),
+                output.cpu().detach(),
                 a1_ids.cpu().detach(),
                 a2_ids.cpu().detach(),
             ),
@@ -263,15 +279,27 @@ class NarrativeModel(plt.LightningModule):
         a1_ids = batch["a1_ids"]
         a2_ids = batch["a2_ids"]
         a1_masks = batch["a1_masks"]
-
-        output_mle, output_ot = self(
-            **batch,
-            is_predict=True,
+        a2_masks = torch.ones(
+            a2_ids.size(), dtype=a1_masks.dtype, device=a1_masks.device
         )
-        # output_ot: [b, l_a - 1, d_hid]
-        # output_mle: [b, d_vocab, l_a - 1]
 
-        loss = self.get_loss(output_mle, output_ot, a1_ids[:, 1:], a1_masks[:, 1:])
+        output = self(
+            **batch,
+            cur_step=batch_idx,
+            max_step=self.datamodule.data_train.size_dataset
+            // self.datamodule.batch_size,
+        )
+        # output: [b, l_a, d_hid]
+
+        # NOTE: This is commented for testing
+        # loss = self.get_loss(output_mle, output_ot, a1_ids[:, 1:], a1_masks[:, 1:])
+        loss = self.criterion(
+            pred=output,
+            a1_ids=a1_ids,
+            a1_masks=a1_masks,
+            a2_ids=a2_ids,
+            a2_masks=a2_masks,
+        )
 
         self.log(
             "valid/loss",
@@ -285,7 +313,7 @@ class NarrativeModel(plt.LightningModule):
         return {
             "loss": loss,
             "pred": (
-                output_mle.cpu().detach(),
+                output.cpu().detach(),
                 a1_ids.cpu().detach(),
                 a2_ids.cpu().detach(),
             ),

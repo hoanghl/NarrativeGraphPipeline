@@ -86,7 +86,7 @@ class Decoder(torch_nn.Module):
         )
         input_ids = [cls_ids.unsqueeze(1)]
 
-        for ith in range(1, self.l_a):
+        for ith in range(1, self.l_a + 1):
             output = self(
                 Y=Y,
                 input_ids=torch.cat(input_ids, dim=1),
@@ -108,14 +108,7 @@ class Decoder(torch_nn.Module):
 
             input_ids.append(new_word)
 
-        ## Get output for OT
-        output_ot = self.embd_layer.get_output_ot(output)
-        # [b, l_a - 1, d_hid]
-
-        output_mle = output.transpose(1, 2)
-        # [b, d_vocab, l_a - 1]
-
-        return output_mle, output_ot
+        return output
 
     ##############################################
     # Methods for scheduled sampling
@@ -147,23 +140,15 @@ class Decoder(torch_nn.Module):
         return output
 
     def do_predict(self, Y):
-
         Y_ = Y.repeat_interleave(self.beam_size, dim=0)
         # [b_, l_a, d_hid]
 
-        outputs = self.generator.beam_sample(None, Y_)
+        output = self.generator.beam_sample(None, Y_)
         # [b, l_a]
-        outputs = ids2dist(outputs, self.d_vocab)
+        output = ids2dist(output, self.d_vocab)
         # [b, l_a, d_vocab]
 
-        ## Get output for OT
-        output_ot = self.embd_layer.get_output_ot(outputs)[:, :-1]
-        # [b, l_a - 1, d_hid]
-
-        output_mle = outputs[:, :-1].transpose(1, 2)
-        # [b, d_vocab, l_a - 1]
-
-        return output_mle, output_ot
+        return output
 
 
 def ids2dist(outputs, d_vocab):

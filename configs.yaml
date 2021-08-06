@@ -22,8 +22,9 @@ defaults:
 PATH:
   utils: ""
   pretrained: ${PATH.utils}/bert-base-uncased
-  data: ${PATH.utils}/story/[SPLIT]/data_[SHARD].parquet
+  data: ${PATH.utils}/processed/story/[SPLIT]/data_[SHARD].parquet
   log: ${work_dir}/logs
+  saved_bert: ${work_dir}/bert_model.pth
 
 mode: train
 
@@ -40,6 +41,7 @@ l_a: 12
 n_c: 10
 
 trainer:
+  _target_: pytorch_lightning.Trainer
   gpus: 1
   min_epochs: 1
   max_epochs: 100
@@ -57,6 +59,7 @@ trainer:
   resume_from_checkpoint: ${PATH.log}/last_best.ckpt
 
 model:
+  _target_: model_utils.narrative_model.NarrativeModel
   batch_size: ${batch_size}
   l_q: ${l_q}
   l_c: ${l_c}
@@ -72,11 +75,13 @@ model:
   beam_size: 20
   n_gram_beam: 8
   path_pretrained: ${PATH.pretrained}
+  path_saved_bert: ${PATH.saved_bert}
   path_pred: ${PATH.log}/pred.json
   path_train_pred: ${PATH.log}/train_pred.json
   path_valid_pred: ${PATH.log}/valid_pred.json
 
 datamodule:
+  _target_: data_utils.narrative_datamodule.NarrativeDataModule
   batch_size: ${batch_size}
   sizes_dataset:
     train: 32747
@@ -95,7 +100,7 @@ callbacks:
     save_last: True
     mode: "min"
     dirpath: ${PATH.log}/tensorboard/ckpts/
-    filename: "narrative_weam-{epoch:02d}"
+    filename: "narrative_weam_bertloss-{epoch:02d}"
   # EarlyStopping:
   #   _target_: pytorch_lightning.callbacks.EarlyStopping
   #   monitor: valid/bleu_1
@@ -107,15 +112,15 @@ callbacks:
 logger:
   tensorboard:
     _target_: pytorch_lightning.loggers.tensorboard.TensorBoardLogger
-    save_dir: ${PATH.log}/tensorboard/
+    save_dir: tensorboard/
     name: default
     version: null
     log_graph: False
     default_hp_metric: False
   wandb:
     _target_: pytorch_lightning.loggers.wandb.WandbLogger
-    project: "narrative_graph"
-    name: narrative_weam-${now:%b-%d:%H-%M}
+    project: "narrative_weam_bertloss"
+    name: ${now:%A %b-%d:%H-%M}
     save_dir: "."
     offline: False # set True to store all logs only locally
     id: null # pass correct id to resume experiment!
