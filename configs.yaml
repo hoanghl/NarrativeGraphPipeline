@@ -22,7 +22,6 @@ defaults:
 PATH:
   utils: ""
   raw: ${PATH.utils}/raw
-  processed_contx: ${PATH.utils}/processed/proc_contx/[ID].json
   data: ${PATH.utils}/processed/story/[SPLIT]/data_[SHARD].parquet
   pretrained: ${PATH.utils}/bert-base-uncased
   train_pred: ${work_dir}/logs/train_pred.json
@@ -35,11 +34,11 @@ mode: train
 
 batch_size: 8
 n_workers: 8
-n_shards: 8
+n_shards: 4
 
 l_q: 35 # sequence length of query (question)
 l_c: 180 # sequence length of each para of context
-n_paras: 10
+n_c: 10
 l_a: 12 # sequence length of answer
 sizes_dataset:
   train: 32747
@@ -51,6 +50,7 @@ trainer:
   gpus: 1
   min_epochs: 1
   max_epochs: 60
+  precision: 16
   auto_lr_find: False
   terminate_on_nan: True
   log_every_n_steps: 40
@@ -76,10 +76,10 @@ model:
   d_vocab: 30522
   d_graph: 2048
   lr: 1e-5
-  switch_frequency: 5
+  switch_frequency: 8
   size_dataset_train: ${sizes_dataset.train}
   max_epochs: ${trainer.max_epochs}
-  warmup_rate: ${0.2}
+  warmup_rate: 0.2
   path_pretrained: ${PATH.pretrained}
   path_train_pred: ${PATH.train_pred}
   path_valid_pred: ${PATH.valid_pred}
@@ -87,15 +87,12 @@ model:
 datamodule:
   _target_: datamodules.narrative_datamodule.NarrativeDataModule
   batch_size: ${batch_size}
-  l_q: ${l_q}
+  sizes_dataset: ${sizes_dataset}
   l_c: ${l_c}
-  l_a: ${l_a}
-  n_paras: ${n_paras}
+  n_c: ${n_c}
   n_workers: ${n_workers}
   n_shards: ${n_shards}
-  sizes_dataset: ${sizes_dataset}
   path_data: ${PATH.data}
-  path_pretrained: ${PATH.pretrained}
 
 callbacks:
   ModelCheckpoint:

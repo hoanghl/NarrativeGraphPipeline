@@ -1,12 +1,12 @@
-from typing import Any
 from itertools import combinations
 from random import sample
+from typing import Any
 
-from torch.nn.parameter import Parameter
-import torch_geometric.nn as torch_g_nn
-import torch.nn as torch_nn
-import torch
 import numpy as np
+import torch
+import torch.nn as torch_nn
+import torch_geometric.nn as torch_g_nn
+from torch.nn.parameter import Parameter
 
 
 class GraphLayer(torch_nn.Module):
@@ -52,9 +52,7 @@ class GraphLayer(torch_nn.Module):
 
         node_feat = self.linear(node_feat)
 
-        node_feat, edge_indx, _ = self.batchify(
-            node_feat, node_len, edge_indx, edge_len
-        )
+        node_feat, edge_indx, _ = self.batchify(node_feat, node_len, edge_indx, edge_len)
 
         X = gcn(node_feat, edge_indx)
         # [n_nodes * b, d_graph//4]
@@ -67,10 +65,10 @@ class GraphLayer(torch_nn.Module):
 
     def batchify(
         self,
-        node_feat: torch.Tensor,
-        node_len: torch.Tensor,
-        edge_indx: torch.Tensor,
-        edge_len: torch.Tensor,
+        node_feat,
+        node_len,
+        edge_indx,
+        edge_len,
     ) -> tuple:
         """Convert batch of node features and edge indices into a big graph"""
         # node_feat : [b, n_nodes, d_hid*3]
@@ -99,8 +97,8 @@ class GraphLayer(torch_nn.Module):
             edge_indx_ = edge_indx[b, :, : edge_len[b].item()].squeeze(0)
 
             ## 2.2. Increment index of that edge indx by accum
-            increment = torch.Tensor([accum]).repeat(edge_indx_.shape)
-            edge_indx_ = edge_indx_ + increment.to(edge_indx_.get_device())
+            increment = torch.tensor([accum], device=edge_indx_.device).repeat(edge_indx_.shape)
+            edge_indx_ = edge_indx_ + increment
 
             ## 2.3. Concate into 'final_edge_indx'
             if final_edge_indx is None:
@@ -135,9 +133,9 @@ class Memory(torch_nn.Module):
 
         ## If load_statedict occurs, it will automatically load the following attributes
         self.node_feats_mem = Parameter(
-            torch.rand(self.batch, self.n_nodes, self.d_hid), requires_grad=False
+            torch.rand(self.batch, self.n_nodes, self.d_hid), requires_grad=True
         )
-        self.edge_index = Parameter(self.gen_edges(), requires_grad=False)
+        self.edge_index = Parameter(self.gen_edges(), requires_grad=True)
 
     def forward(self):
         pass
@@ -155,9 +153,7 @@ class Memory(torch_nn.Module):
             Y = torch.cat((Y, tmp), dim=0)
         # Y: [batch, n_nodes, d_hid]
 
-        self.node_feats_mem = torch.nn.parameter.Parameter(
-            Y.detach(), requires_grad=False
-        )
+        self.node_feats_mem = torch.nn.parameter.Parameter(Y.detach(), requires_grad=True)
 
     def gen_edges(self):
         edge_pair = list(combinations(range(self.n_nodes), 2))

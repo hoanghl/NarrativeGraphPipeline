@@ -34,15 +34,15 @@ class BertDecoder(torch_nn.Module):
 
         self.ff = torch_nn.Linear(d_bert, d_vocab)
 
-    def forward(self, Y: torch.Tensor, ans_ids: torch.Tensor, ans_mask: torch.Tensor):
-        # Y       : [b, l_a, d_bert]
-        # ans_ids : [b, seq_len]
-        # ans_mask: [b, seq_len]
+    def forward(self, Y, a_ids, a_masks=None):
+        # Y: [b, n_nodes, d_bert]
+        # a_ids : [b, seq_len]
+        # a_masks: [b, seq_len]
 
-        input_embds = self.embd_layer.encode_ans(ans_ids=ans_ids, ans_mask=ans_mask)
+        input_embds = self.embd_layer.encode_ans(a_ids=a_ids, a_masks=a_masks)
 
         output = self.decoder(
-            inputs_embeds=input_embds, attention_mask=ans_mask, encoder_hidden_states=Y
+            inputs_embeds=input_embds, attention_mask=a_masks, encoder_hidden_states=Y
         )[0]
         # [b, l_a, 768]
 
@@ -53,21 +53,21 @@ class BertDecoder(torch_nn.Module):
 
     def do_train(
         self,
-        Y: torch.Tensor,
-        ans_ids: torch.Tensor,
-        ans_mask: torch.Tensor,
+        Y,
+        a_ids,
+        a_masks,
         cur_step: int,
         max_step: int,
     ):
-        # Y         : [b, l_c, d_hid]
-        # ans_ids   : [b, l_a]
-        # ans_mask  : [b, l_a]
+        # Y: [b, n_nodes, d_bert]
+        # a_ids: [b, l_a]
+        # a_masks: [b, l_a]
 
         input_ids = torch.full((Y.size()[0], 1), self.cls_tok_id, device=Y.device)
         # [b, 1]
 
         for ith in range(1, self.l_a + 1):
-            output = self(Y=Y, ans_ids=input_ids, ans_mask=ans_mask[:, :ith])
+            output = self(Y=Y, a_ids=input_ids, a_masks=a_masks[:, :ith])
             # [b, ith, d_vocab]
 
             ## Apply Scheduling teacher
@@ -77,7 +77,7 @@ class BertDecoder(torch_nn.Module):
             _, topi = torch.topk(torch.softmax(output[:, -1, :], dim=-1), k=1)
             chosen = self.choose_scheduled_sampling(
                 output=topi,
-                ans_ids=ans_ids,
+                a_ids=a_ids,
                 ith=ith,
                 cur_step=cur_step,
                 max_step=max_step,
@@ -96,15 +96,15 @@ class BertDecoder(torch_nn.Module):
 
     def choose_scheduled_sampling(
         self,
-        output: torch.Tensor,
-        ans_ids: torch.Tensor,
+        output,
+        a_ids,
         ith: int,
         cur_step: int,
         max_step,
     ):
 
         # output: [b, 1]
-        # ans_ids   : [b, l_a]
+        # a_ids   : [b, l_a]
 
         self.t = (
             np.random.binomial(1, cur_step / max_step)
@@ -112,31 +112,24 @@ class BertDecoder(torch_nn.Module):
             else np.random.binomial(1, 1)
         )
 
-        return ans_ids[:, ith].unsqueeze(1) if self.t == 0 else output
+        return a_ids[:, ith].unsqueeze(1) if self.t == 0 else output
 
-    def do_predict(
-        self,
-        Y: torch.Tensor,
-        a_masks: torch.Tensor,
-    ):
+    def do_predict(self, Y):
+        # Y: [b, n_nodes, d_bert]
 
         b = Y.size(0)
 
         ## Init input_embs with cls embedding
         cls_ids = torch.full(
             (b,),
-            fill_value=self.tokenizer.cls_token_id,
+            fill_value=self.cls_tok_id,
             device=Y.device,
             requires_grad=False,
         )
         input_ids = [cls_ids.unsqueeze(1)]
 
-        for ith in range(1, self.l_a):
-            output = self(
-                Y=Y,
-                input_ids=torch.cat(input_ids, dim=1),
-                input_masks=a_masks[:, :ith],
-            )
+        for ith in range(1, self.l_a + 1):
+            output = self(Y=Y, a_ids=torch.cat(input_ids, dim=1))
             # [b, ith, d_vocab]
 
             if ith == self.l_a:
@@ -147,10 +140,10 @@ class BertDecoder(torch_nn.Module):
             input_ids.append(topi.detach())
 
         ## Get output for OT
-        output_ot = self.embd_layer.get_output_ot(output)
+        output_ot = self.embd_layer.get_output_ot(torch.softmax(output, dim=-1))[:, :-1]
         # [b, l_a - 1, d_hid]
 
-        output_mle = output.transpose(1, 2)
+        output_mle = output[:, :-1].transpose(1, 2)
         # [b, d_vocab, l_a - 1]
 
         return output_mle, output_ot

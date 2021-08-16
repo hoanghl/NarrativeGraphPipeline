@@ -9,7 +9,7 @@ import numpy as np
 import torch
 
 
-def ipot(a1: torch.Tensor, a2: torch.Tensor, beta=2, max_iter=100, L=1):
+def ipot(a1, a2, beta=2, max_iter=100, L=1):
     """Calculate loss based on OT."""
 
     b, l_a, d_hid = a1.size()
@@ -207,22 +207,14 @@ class GeneratorHugging(GenerationMixin):
 
         # init attention / hidden states / scores tuples
         scores = () if (return_dict_in_generate and output_scores) else None
-        decoder_attentions = (
-            () if (return_dict_in_generate and output_attentions) else None
-        )
-        cross_attentions = (
-            () if (return_dict_in_generate and output_attentions) else None
-        )
-        decoder_hidden_states = (
-            () if (return_dict_in_generate and output_hidden_states) else None
-        )
+        decoder_attentions = () if (return_dict_in_generate and output_attentions) else None
+        cross_attentions = () if (return_dict_in_generate and output_attentions) else None
+        decoder_hidden_states = () if (return_dict_in_generate and output_hidden_states) else None
 
         # if model is an encoder-decoder, retrieve encoder attention weights and hidden states
         if return_dict_in_generate and is_encoder_decoder:
             encoder_attentions = (
-                model_kwargs["encoder_outputs"].get("attentions")
-                if output_attentions
-                else None
+                model_kwargs["encoder_outputs"].get("attentions") if output_attentions else None
             )
             encoder_hidden_states = (
                 model_kwargs["encoder_outputs"].get("hidden_states")
@@ -244,7 +236,9 @@ class GeneratorHugging(GenerationMixin):
 
         batch_beam_size, cur_len = input_ids.shape
 
-        beam_scores = torch.zeros((batch_size, num_beams), dtype=torch.float, device=encoder_outputs.device)
+        beam_scores = torch.zeros(
+            (batch_size, num_beams), dtype=torch.float, device=encoder_outputs.device
+        )
         beam_scores = beam_scores.view((batch_size * num_beams,))
 
         while cur_len < self.max_length:
@@ -290,18 +284,14 @@ class GeneratorHugging(GenerationMixin):
 
             # reshape for beam search
             vocab_size = next_token_scores.shape[-1]
-            next_token_scores = next_token_scores.view(
-                batch_size, num_beams * vocab_size
-            )
+            next_token_scores = next_token_scores.view(batch_size, num_beams * vocab_size)
 
             probs = F.softmax(next_token_scores, dim=-1)
 
             next_tokens = torch.multinomial(probs, num_samples=2 * num_beams)
             next_token_scores = torch.gather(next_token_scores, -1, next_tokens)
 
-            next_token_scores, _indices = torch.sort(
-                next_token_scores, descending=True, dim=1
-            )
+            next_token_scores, _indices = torch.sort(next_token_scores, descending=True, dim=1)
             next_tokens = torch.gather(next_tokens, -1, _indices)
 
             next_indices = next_tokens // vocab_size
@@ -320,9 +310,7 @@ class GeneratorHugging(GenerationMixin):
             beam_next_tokens = beam_outputs["next_beam_tokens"]
             beam_idx = beam_outputs["next_beam_indices"]
 
-            input_ids = torch.cat(
-                [input_ids[beam_idx, :], beam_next_tokens.unsqueeze(-1)], dim=-1
-            )
+            input_ids = torch.cat([input_ids[beam_idx, :], beam_next_tokens.unsqueeze(-1)], dim=-1)
             cur_len = cur_len + 1
 
             # model_kwargs = self._update_model_kwargs_for_generation(

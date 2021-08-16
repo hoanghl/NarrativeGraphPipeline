@@ -1,7 +1,7 @@
 from itertools import combinations
 
-import torch.nn as torch_nn
 import torch
+import torch.nn as torch_nn
 
 from models.layers.reasoning_layer.sub_layers import GraphLayer, Memory
 
@@ -33,25 +33,25 @@ class GraphBasedMemoryLayer(torch_nn.Module):
         self.lin3 = torch_nn.Linear(l_q, n_nodes, bias=False)
         self.lin4 = torch_nn.Linear(d_hid, d_bert, bias=False)
 
-    def forward(self, ques, context):
-        # ques : [b, l_q, d_bert]
-        # context: [b, n_paras, d_bert]
+    def forward(self, q, c):
+        # q : [b, l_q, d_bert]
+        # c: [b, n_c, d_bert]
 
         (
             b,
-            n_paras,
+            n_c,
             _,
-        ) = context.size()
+        ) = c.size()
 
         ######################################
         # Use TransformerEncoder to encode
-        # question and context
+        # question and c
         ######################################
-        ques_ = torch.mean(ques, dim=1).unsqueeze(1).repeat(1, n_paras, 1)
-        X = torch.cat((context, ques_), dim=2)
-        # [b, n_paras, d_bert*2]
+        q_ = torch.mean(q, dim=1).unsqueeze(1).repeat(1, n_c, 1)
+        X = torch.cat((c, q_), dim=2)
+        # [b, n_c, d_bert*2]
         X = self.lin1(X)
-        # [b, n_paras, d_hid]
+        # [b, n_c, d_hid]
 
         ######################################
         # Get node feat and edge indx from memory
@@ -73,11 +73,9 @@ class GraphBasedMemoryLayer(torch_nn.Module):
         # Create node feat from tensor X
         node_feats = []
 
-        for pair in combinations(range(n_paras), 2):
+        for pair in combinations(range(n_c), 2):
             idx1, idx2 = pair
-            node_feats.append(
-                torch.cat([X[:, idx1, :], X[:, idx2, :]], dim=-1).unsqueeze(1)
-            )
+            node_feats.append(torch.cat([X[:, idx1, :], X[:, idx2, :]], dim=-1).unsqueeze(1))
 
         node_feats = torch.cat(node_feats, dim=1)
         # [b, n_nodes, d_hid*2]
@@ -99,26 +97,8 @@ class GraphBasedMemoryLayer(torch_nn.Module):
         ######################################
         self.memory.update_mem(Y)
 
-        ######################################
-        # Derive attentive matrix from question
-        # for tensor 'Y'
-        ######################################
-        ques = self.lin2(ques)
-        # [b, l_q, l_a]
-        attentive = self.lin3(ques.transpose(1, 2))
-        # [b, l_a, n_nodes]
-
-        Y = torch.bmm(torch.softmax(attentive, dim=2), Y)
-        # [b, l_a, d_hid]
-        # print(f"Y softmax       max: {Y.max()}")
-        # print(f"Y softmax       min: {Y.min()}")
-        # print(f"===================================================")
-        # if Y.max() > 1e10 or Y.min() < -1e10:
-        #     print("Too large/small as resoning: softmax")
-        #     raise ValueError()
-
         Y = self.lin4(Y)
-        # [b, l_a, d_bert]
+        # [b, n_nodes, d_bert]
 
         return Y
 

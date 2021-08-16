@@ -1,6 +1,12 @@
-# CHANGELOG
-
 ### This file contains changes and modifications during developing.
+
+## Aug 16, 22:25
+
+- Refactor datamodule and dataset to truly uses data **v4.3**
+- Refactor variable names: ques -> q, context -> c...
+- Set _Memory Parameter_ as `requires_grad=True`
+- Increase _iterations_ in _ipot_ to 400
+- Fix some errors
 
 ## Aug 16 2021, 15:35
 

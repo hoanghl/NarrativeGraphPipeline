@@ -128,7 +128,7 @@ class NarrativeModel(plt.LightningModule):
         )
 
     def get_prediction(self, output_mle, a1_ids, a2_ids):
-        _, prediction = torch.topk(output_mle, 1, dim=1)
+        prediction = torch.argmax(output_mle, dim=1)
 
         prediction = [
             {
@@ -143,7 +143,7 @@ class NarrativeModel(plt.LightningModule):
 
         return prediction
 
-    def get_loss(self, output_mle, output_ot, a_ids, a_masks, gamma=0.5):
+    def get_loss(self, output_mle, output_ot, a_ids, a_masks, gamma=0.1):
         # output_mle: [b, d_vocab, l_a-1]
         # output_ot: [b, l_a-1, d_hid]
         # a_ids: [b, l_a]
@@ -153,10 +153,10 @@ class NarrativeModel(plt.LightningModule):
         loss_mle = self.criterion(output_mle, a_ids[:, 1:])
 
         # Calculate OT loss
-        ans = self.embd_layer.encode_ans(ans_ids=a_ids, ans_mask=a_masks, ot_loss=True)[:, 1:]
+        a = self.embd_layer.encode_ans(a_ids=a_ids, a_masks=a_masks, ot_loss=True)[:, 1:]
         # [b, l_a-1, d_hid]
 
-        loss_ot = ipot(output_ot, ans)
+        loss_ot = ipot(output_ot, a, max_iter=400)
 
         total_loss = loss_mle + gamma * loss_ot
 
@@ -164,42 +164,42 @@ class NarrativeModel(plt.LightningModule):
 
     def forward(
         self,
-        ques_ids,
-        ques_mask,
-        context_ids,
-        context_mask,
-        ans1_ids=None,
-        ans1_mask=None,
+        q_ids,
+        q_masks,
+        c_ids,
+        c_masks,
+        a1_ids=None,
+        a1_masks=None,
         cur_step=0,
         max_step=0,
         is_predict=False,
         **kwargs
     ):
-        # ques       : [b, l_q]
-        # ques_mask  : [b, l_q]
-        # context_ids  : [b, n_paras, l_c]
-        # context_mask : [b, n_paras, l_c]
-        # ans1_ids: [b, l_a]
-        # ans1_mask   : [b, l_a]
+        # q_ids: [b, l_q]
+        # q_masks  : [b, l_q]
+        # c_ids: [b, n_c, l_c]
+        # c_masks : [b, n_c, l_c]
+        # a1_ids: [b, l_a]
+        # a1_masks   : [b, l_a]
 
         ####################
-        # Embed question, context and answer
+        # Embed question, c and answer
         ####################
-        ques, context = self.embd_layer.encode_ques_para(
-            ques_ids=ques_ids,
-            context_ids=context_ids,
-            ques_mask=ques_mask,
-            context_mask=context_mask,
+        q, c = self.embd_layer.encode_ques_para(
+            q_ids=q_ids,
+            c_ids=c_ids,
+            q_masks=q_masks,
+            c_masks=c_masks,
         )
-        # ques : [b, l_q, d_bert]
-        # context: [b, n_paras, d_bert]
-        # ans  : [b, l_a, d_bert]
+        # q: [b, l_q, d_bert]
+        # c: [b, n_c, d_bert]
+        # a: [b, l_a, d_bert]
 
         ####################
         # Do reasoning
         ####################
-        Y = self.reasoning(ques, context)
-        # [b, l_a, d_bert]
+        Y = self.reasoning(q, c)
+        # [b, n_nodes, d_bert]
 
         ####################
         # Generate answer
@@ -207,13 +207,13 @@ class NarrativeModel(plt.LightningModule):
         return (
             self.ans_infer.do_train(
                 Y=Y,
-                ans_ids=ans1_ids,
-                ans_mask=ans1_mask,
+                a_ids=a1_ids,
+                a_masks=a1_masks,
                 cur_step=cur_step,
                 max_step=max_step,
             )
             if not is_predict
-            else self.ans_infer.do_predict(Y, ans1_mask)
+            else self.ans_infer.do_predict(Y=Y)
         )
 
     def training_step(self, batch: Any, batch_idx: int):
@@ -225,10 +225,10 @@ class NarrativeModel(plt.LightningModule):
         # output_ot: [b, l_a - 1, d_hid]
         # output_mle: [b, d_vocab, l_a - 1]
 
-        ans1_ids = batch["ans1_ids"]
-        ans2_ids = batch["ans2_ids"]
-        ans1_mask = batch["ans1_mask"]
-        loss = self.get_loss(output_mle, output_ot, ans1_ids, ans1_mask)
+        a1_ids = batch["a1_ids"]
+        a2_ids = batch["a2_ids"]
+        a1_masks = batch["a1_masks"]
+        loss = self.get_loss(output_mle, output_ot, a1_ids, a1_masks)
 
         self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=False)
 
@@ -236,8 +236,8 @@ class NarrativeModel(plt.LightningModule):
             "loss": loss,
             "pred": (
                 output_mle.cpu().detach(),
-                ans1_ids.cpu().detach(),
-                ans2_ids.cpu().detach(),
+                a1_ids.cpu().detach(),
+                a2_ids.cpu().detach(),
             ),
         }
 
@@ -258,19 +258,21 @@ class NarrativeModel(plt.LightningModule):
 
     def configure_optimizers(self):
         no_decay = ["bias", "LayerNorm.weight"]
+        params_decay, params_nodecay = [], []
+        for model in [self.embd_layer, self.reasoning, self.ans_infer]:
+            for n, p in model.named_parameters():
+                if not any(nd in n for nd in no_decay):
+                    params_decay.append(p)
+                else:
+                    params_nodecay.append(p)
+
         optimizer_grouped_parameters = [
             {
-                "params": [
-                    p
-                    for n, p in self.model.named_parameters()
-                    if not any(nd in n for nd in no_decay)
-                ],
+                "params": params_decay,
                 "weight_decay": 0.95,
             },
             {
-                "params": [
-                    p for n, p in self.model.named_parameters() if any(nd in n for nd in no_decay)
-                ],
+                "params": params_nodecay,
                 "weight_decay": 0.0,
             },
         ]
@@ -297,10 +299,10 @@ class NarrativeModel(plt.LightningModule):
         # output_ot: [b, l_a - 1, d_hid]
         # output_mle: [b, d_vocab, l_a - 1]
 
-        ans1_ids = batch["ans1_ids"]
-        ans2_ids = batch["ans2_ids"]
-        ans1_mask = batch["ans1_mask"]
-        loss = self.get_loss(output_mle, output_ot, ans1_ids, ans1_mask)
+        a1_ids = batch["a1_ids"]
+        a2_ids = batch["a2_ids"]
+        a1_masks = batch["a1_masks"]
+        loss = self.get_loss(output_mle, output_ot, a1_ids, a1_masks)
 
         self.log("valid/loss", loss, on_step=False, on_epoch=True, prog_bar=False)
 
@@ -308,8 +310,8 @@ class NarrativeModel(plt.LightningModule):
             "loss": loss,
             "pred": (
                 output_mle.cpu().detach(),
-                ans1_ids.cpu().detach(),
-                ans2_ids.cpu().detach(),
+                a1_ids.cpu().detach(),
+                a2_ids.cpu().detach(),
             ),
         }
 
@@ -342,14 +344,14 @@ class NarrativeModel(plt.LightningModule):
         # output_ot: [b, l_a - 1, d_hid]
         # output_mle: [b, d_vocab, l_a - 1]
 
-        ans1_ids = batch["ans1_ids"]
-        ans2_ids = batch["ans2_ids"]
+        a1_ids = batch["a1_ids"]
+        a2_ids = batch["a2_ids"]
 
         return {
             "pred": (
                 output_mle.cpu().detach(),
-                ans1_ids.cpu().detach(),
-                ans2_ids.cpu().detach(),
+                a1_ids.cpu().detach(),
+                a2_ids.cpu().detach(),
             ),
         }
 

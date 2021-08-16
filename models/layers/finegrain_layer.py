@@ -1,14 +1,14 @@
-from transformers import BertModel
-import transformers
-import torch.nn.functional as torch_f
-import torch.nn as torch_nn
 import torch
+import torch.nn as torch_nn
+import torch.nn.functional as torch_f
+import transformers
+from transformers import BertModel
 
 transformers.logging.set_verbosity_error()
 
 
 class FineGrain(torch_nn.Module):
-    """Embed and generate question-aware context"""
+    """Embed and generate question-aware c"""
 
     def __init__(
         self,
@@ -56,16 +56,16 @@ class FineGrain(torch_nn.Module):
     def forward(self):
         return
 
-    def encode_ques_para(self, ques_ids, context_ids, ques_mask, context_mask):
-        # ques_ids          : [b, l_q]
-        # context_ids         : [b, n_paras, l_c]
-        # ques_mask     : [b, l_q]
-        # context_mask    : [b, n_paras, l_c]
+    def encode_ques_para(self, q_ids, c_ids, q_masks, c_masks):
+        # q_ids: [b, l_q]
+        # c_ids: [b, n_c, l_c]
+        # q_masks: [b, l_q]
+        # c_masks: [b, n_c, l_c]
 
-        b, n_paras, l_c = context_ids.shape
+        b, n_c, l_c = c_ids.shape
 
-        ques = self.bert_emb(input_ids=ques_ids, attention_mask=ques_mask)[0]
-        # ques  : [b, l_q, d_bert]
+        q = self.bert_emb(input_ids=q_ids, attention_mask=q_masks)[0]
+        # q  : [b, l_q, d_bert]
 
         #########################
         # Operate CoAttention question
@@ -73,23 +73,23 @@ class FineGrain(torch_nn.Module):
         #########################
         paragraphs = []
 
-        for ith in range(n_paras):
-            contx = context_ids[:, ith, :]
-            contx_mask = context_mask[:, ith, :]
+        for ith in range(n_c):
+            contx = c_ids[:, ith, :]
+            contx_mask = c_masks[:, ith, :]
 
             ###################
-            # Embed context
+            # Embed c
             ###################
             L_s = self.bert_emb(input_ids=contx, attention_mask=contx_mask)[0]
             # L_s: [b, l_c, d_bert]
 
             ###################
             # Operate CoAttention between
-            # query and context
+            # query and c
             ###################
 
             # Affinity matrix
-            A = torch.bmm(L_s, ques.transpose(1, 2))
+            A = torch.bmm(L_s, q.transpose(1, 2))
             # A: [b, l_c, l_q]
 
             # S_s  = torch.matmul(torch_f.softmax(A, dim=1), E_q)
@@ -104,55 +104,47 @@ class FineGrain(torch_nn.Module):
 
             paragraphs.append(C_s)
 
-        context = torch.cat((paragraphs), dim=1)
-        # [b, n_paras, l_c, d_bert]
+        c = torch.cat((paragraphs), dim=1)
+        # [b, n_c, l_c, d_bert]
 
         #########################
-        # Reduce 'context' by applying attentive method
-        # based on 'ques'
+        # Reduce 'c' by applying attentive method
+        # based on 'q'
         #########################
-        ques_ = torch.mean(ques, dim=1)
+        q_ = torch.mean(q, dim=1)
         # [b, d_bert]
 
-        context_ = context.reshape(-1, l_c, self.d_bert)
+        context_ = c.reshape(-1, l_c, self.d_bert)
         # paras_len = torch.sum(paras_mask, dim=2).reshape(-1).to("cpu")
-        # context_    : [b*n_paras, l_c, d_bert]
-        # paras_mask: [b*n_paras]
+        # context_    : [b*n_c, l_c, d_bert]
+        # paras_mask: [b*n_c]
 
-        # for i in range(paras_len.shape[0]):
-        #     if paras_len[i] == 0:
-        #         paras_len[i] = 1
-
-        # tmp     = torch_nn.utils.rnn.pack_padded_sequence(context_, paras_len, batch_first=True,
-        #                                                   enforce_sorted=False)
-        # tmp     = self.biGRU_mask(tmp)[0]
-        # context_  = torch_nn.utils.rnn.pad_packed_sequence(tmp, batch_first=True)[0]
         context_ = self.biGRU_mask(context_)[0]
-        # [b*n_paras, l_c, d_bert]
+        # [b*n_c, l_c, d_bert]
 
-        paras_first = context_[:, 0, :].reshape(b, n_paras, -1)
-        # [b, n_paras, d_bert]
+        paras_first = context_[:, 0, :].reshape(b, n_c, -1)
+        # [b, n_c, d_bert]
 
-        q_ = ques_.unsqueeze(1).repeat(1, n_paras, 1)
-        # [b, n_paras, d_bert]
+        q_ = q_.unsqueeze(1).repeat(1, n_c, 1)
+        # [b, n_c, d_bert]
         selector = torch.cat((q_, paras_first), dim=2)
-        # [b, n_paras, d_bert*2]
+        # [b, n_c, d_bert*2]
         selector = self.lin_attn(selector)
-        # [b, n_paras, l_c]
+        # [b, n_c, l_c]
 
         selector = selector.unsqueeze(3).repeat(1, 1, 1, self.d_bert)
-        # [b, n_paras, l_c, d_bert]
+        # [b, n_c, l_c, d_bert]
 
-        context = torch.sum(context * selector, dim=2)
-        # [b, n_paras, d_bert]
+        c = torch.sum(c * selector, dim=2)
+        # [b, n_c, d_bert]
 
-        return ques, context
+        return q, c
 
-    def encode_ans(self, ans_ids, ans_mask, ot_loss=False):
-        # ans_ids: [b, l_a]
-        # ans_mask: [b, l_a]
+    def encode_ans(self, a_ids, a_masks, ot_loss=False):
+        # a_ids: [b, l_a]
+        # a_masks: [b, l_a]
 
-        output = self.bert_emb(input_ids=ans_ids, attention_mask=ans_mask)[0]
+        output = self.bert_emb(input_ids=a_ids, attention_mask=a_masks)[0]
         # [b, l_a, d_bert]
         if ot_loss:
             output = self.lin1(output)
