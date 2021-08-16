@@ -2,6 +2,13 @@
 
 ### This file contains changes and modifications during developing.
 
+## Aug 16 2021, 15:35
+
+- Use data v4.3
+- Remove BeamSearch, use Greedy in validation
+- Use Linear learning rate scheduler
+- Changes some configurations in **configs.yaml**
+
 ## Aug 3 2021, 10:27
 
 - Add 2 modes: _debug_train_ and _debug_predict_

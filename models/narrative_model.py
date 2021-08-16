@@ -1,17 +1,16 @@
-from typing import Any, Optional
 import json
+from typing import Any, Optional
 
-
-from transformers import AdamW, BertTokenizer
 import pytorch_lightning as plt
-import torch.nn as torch_nn
 import torch
+import torch.nn as torch_nn
+from transformers import AdamW, BertTokenizer, get_linear_schedule_with_warmup
 
 from datamodules.narrative_datamodule import NarrativeDataModule
-from models.layers.reasoning_layer.memorygraph_layer import GraphBasedMemoryLayer
-from models.layers.finegrain_layer import FineGrain
 from models.layers.ans_infer_layer import BertDecoder
-from utils.model_utils import ipot, get_scores
+from models.layers.finegrain_layer import FineGrain
+from models.layers.reasoning_layer.memorygraph_layer import GraphBasedMemoryLayer
+from utils.model_utils import get_scores, ipot
 
 
 class NarrativeModel(plt.LightningModule):
@@ -30,8 +29,9 @@ class NarrativeModel(plt.LightningModule):
         d_graph,
         lr,
         switch_frequency,
-        beam_size,
-        n_gram_beam,
+        size_dataset_train,
+        max_epochs,
+        warmup_rate,
         path_pretrained,
         path_train_pred,
         path_valid_pred,
@@ -44,10 +44,11 @@ class NarrativeModel(plt.LightningModule):
         self.d_vocab = d_vocab
         self.batch_size = batch_size
         self.lr = lr
-        self.beam_size = beam_size
-        self.n_gram_beam = n_gram_beam
         self.l_a = l_a
         self.switch_frequency = switch_frequency
+        self.size_dataset_train = size_dataset_train
+        self.max_epochs = max_epochs
+        self.warmup_rate = warmup_rate
 
         self.bert_tokenizer = BertTokenizer.from_pretrained(path_pretrained)
         self.datamodule = datamodule
@@ -77,17 +78,12 @@ class NarrativeModel(plt.LightningModule):
             n_edges=n_edges,
         )
         self.ans_infer = BertDecoder(
-            batch_size=batch_size,
             l_a=l_a,
             d_bert=d_bert,
             d_vocab=d_vocab,
             cls_tok_id=self.bert_tokenizer.cls_token_id,
             sep_tok_id=self.bert_tokenizer.sep_token_id,
-            pad_tok_id=self.bert_tokenizer.pad_token_id,
-            beam_size=beam_size,
-            n_gram_beam=n_gram_beam,
             embd_layer=self.embd_layer,
-            device=self.device,
         )
 
         ## Freeeze some parameters
@@ -102,9 +98,7 @@ class NarrativeModel(plt.LightningModule):
         #############################
         # Define things
         #############################
-        self.criterion = torch_nn.CrossEntropyLoss(
-            ignore_index=self.bert_tokenizer.pad_token_id
-        )
+        self.criterion = torch_nn.CrossEntropyLoss(ignore_index=self.bert_tokenizer.pad_token_id)
 
     ####################################################################
     # FOR TRAINING PURPOSE
@@ -159,9 +153,7 @@ class NarrativeModel(plt.LightningModule):
         loss_mle = self.criterion(output_mle, a_ids[:, 1:])
 
         # Calculate OT loss
-        ans = self.embd_layer.encode_ans(ans_ids=a_ids, ans_mask=a_masks, ot_loss=True)[
-            :, 1:
-        ]
+        ans = self.embd_layer.encode_ans(ans_ids=a_ids, ans_mask=a_masks, ot_loss=True)[:, 1:]
         # [b, l_a-1, d_hid]
 
         loss_ot = ipot(output_ot, ans)
@@ -221,15 +213,14 @@ class NarrativeModel(plt.LightningModule):
                 max_step=max_step,
             )
             if not is_predict
-            else self.ans_infer.do_predict(Y)
+            else self.ans_infer.do_predict(Y, ans1_mask)
         )
 
     def training_step(self, batch: Any, batch_idx: int):
         output_mle, output_ot = self(
             **batch,
             cur_step=batch_idx,
-            max_step=self.datamodule.data_train.size_dataset
-            // self.datamodule.batch_size,
+            max_step=self.datamodule.data_train.size_dataset // self.datamodule.batch_size,
         )
         # output_ot: [b, l_a - 1, d_hid]
         # output_mle: [b, d_vocab, l_a - 1]
@@ -267,31 +258,36 @@ class NarrativeModel(plt.LightningModule):
 
     def configure_optimizers(self):
         no_decay = ["bias", "LayerNorm.weight"]
-        params1, params2 = [], []
-        for layer in [self.embd_layer, self.reasoning, self.ans_infer]:
-            for n, p in layer.named_parameters():
-                if not any(nd in n for nd in no_decay):
-                    params1.append(p)
-                else:
-                    params2.append(p)
         optimizer_grouped_parameters = [
             {
-                "params": params1,
+                "params": [
+                    p
+                    for n, p in self.model.named_parameters()
+                    if not any(nd in n for nd in no_decay)
+                ],
                 "weight_decay": 0.95,
             },
             {
-                "params": params2,
+                "params": [
+                    p for n, p in self.model.named_parameters() if any(nd in n for nd in no_decay)
+                ],
                 "weight_decay": 0.0,
             },
         ]
         optimizer = AdamW(params=optimizer_grouped_parameters, lr=self.lr)
 
-        return {
-            "optimizer": optimizer,
-            "lr_scheduler": torch.optim.lr_scheduler.CosineAnnealingLR(
-                optimizer, T_max=60, eta_min=0
+        n_training_steps = self.size_dataset_train // self.batch_size * self.max_epochs
+        lr_scheduler = {
+            "scheduler": get_linear_schedule_with_warmup(
+                optimizer,
+                num_warmup_steps=int(n_training_steps * self.warmup_rate),
+                num_training_steps=n_training_steps,
             ),
+            "name": "learning_rate",
+            "interval": "step",
+            "frequency": 1,
         }
+        return [optimizer], [lr_scheduler]
 
     #########################################
     # FOR PREDICTION PURPOSE

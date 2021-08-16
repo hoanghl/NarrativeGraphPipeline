@@ -23,7 +23,7 @@ PATH:
   utils: ""
   raw: ${PATH.utils}/raw
   processed_contx: ${PATH.utils}/processed/proc_contx/[ID].json
-  data: ${PATH.utils}/processed/story_v42/[SPLIT]/data_[SHARD].parquet
+  data: ${PATH.utils}/processed/story/[SPLIT]/data_[SHARD].parquet
   pretrained: ${PATH.utils}/bert-base-uncased
   train_pred: ${work_dir}/logs/train_pred.json
   valid_pred: ${work_dir}/logs/valid_pred.json
@@ -37,10 +37,14 @@ batch_size: 8
 n_workers: 8
 n_shards: 8
 
-l_q: 42 # sequence length of query (question)
-l_c: 170 # sequence length of each para of context
+l_q: 35 # sequence length of query (question)
+l_c: 180 # sequence length of each para of context
 n_paras: 10
 l_a: 12 # sequence length of answer
+sizes_dataset:
+  train: 32747
+  test: 10557
+  valid: 3461
 
 trainer:
   _target_: pytorch_lightning.Trainer
@@ -73,8 +77,9 @@ model:
   d_graph: 2048
   lr: 1e-5
   switch_frequency: 5
-  beam_size: 20
-  n_gram_beam: 8
+  size_dataset_train: ${sizes_dataset.train}
+  max_epochs: ${trainer.max_epochs}
+  warmup_rate: ${0.2}
   path_pretrained: ${PATH.pretrained}
   path_train_pred: ${PATH.train_pred}
   path_valid_pred: ${PATH.valid_pred}
@@ -88,10 +93,7 @@ datamodule:
   n_paras: ${n_paras}
   n_workers: ${n_workers}
   n_shards: ${n_shards}
-  sizes_dataset:
-    train: 32747
-    test: 10557
-    valid: 3461
+  sizes_dataset: ${sizes_dataset}
   path_data: ${PATH.data}
   path_pretrained: ${PATH.pretrained}
 
@@ -104,6 +106,9 @@ callbacks:
     mode: "min"
     dirpath: "chkpts/"
     filename: "narrative_graph-{epoch:02d}"
+  LearningRateMonitor:
+    _target_: pytorch_lightning.callbacks.LearningRateMonitor
+    logging_interval: step
   # EarlyStopping:
   #   _target_: pytorch_lightning.callbacks.EarlyStopping
   #   monitor: valid/bleu_1
@@ -124,7 +129,7 @@ logger:
   wandb:
     _target_: pytorch_lightning.loggers.wandb.WandbLogger
     project: "narrative_graph"
-    name: narrative_graph-${now:%b-%d:%H-%M}
+    name: ${now:%A %b-%d %H:%M}
     save_dir: "."
     offline: False # set True to store all logs only locally
     id: null # pass correct id to resume experiment!
