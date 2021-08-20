@@ -1,5 +1,11 @@
 ### This file contains changes and modifications during developing.
 
+## Aug 20, 22:25
+
+- Discard _memory component_ in _Graph reasoning module_
+- Modify some configurations
+- Use **Hard-Easy 50-50 strategy** for dataset switching
+
 ## Aug 16, 22:25
 
 - Refactor datamodule and dataset to truly uses data **v4.3**

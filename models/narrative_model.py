@@ -9,7 +9,7 @@ from transformers import AdamW, BertTokenizer, get_linear_schedule_with_warmup
 from datamodules.narrative_datamodule import NarrativeDataModule
 from models.layers.ans_infer_layer import BertDecoder
 from models.layers.finegrain_layer import FineGrain
-from models.layers.reasoning_layer.memorygraph_layer import GraphBasedMemoryLayer
+from models.layers.graph_layer import GraphBasedLayer
 from utils.model_utils import get_scores, ipot
 
 
@@ -28,7 +28,7 @@ class NarrativeModel(plt.LightningModule):
         d_vocab,
         d_graph,
         lr,
-        switch_frequency,
+        w_decay,
         size_dataset_train,
         max_epochs,
         warmup_rate,
@@ -41,11 +41,11 @@ class NarrativeModel(plt.LightningModule):
 
         super().__init__()
 
-        self.d_vocab = d_vocab
         self.batch_size = batch_size
-        self.lr = lr
         self.l_a = l_a
-        self.switch_frequency = switch_frequency
+        self.d_vocab = d_vocab
+        self.lr = lr
+        self.w_decay = w_decay
         self.size_dataset_train = size_dataset_train
         self.max_epochs = max_epochs
         self.warmup_rate = warmup_rate
@@ -67,7 +67,7 @@ class NarrativeModel(plt.LightningModule):
             d_hid=d_hid,
             path_pretrained=path_pretrained,
         )
-        self.reasoning = GraphBasedMemoryLayer(
+        self.reasoning = GraphBasedLayer(
             batch_size=batch_size,
             l_q=l_q,
             l_a=l_a,
@@ -88,7 +88,7 @@ class NarrativeModel(plt.LightningModule):
 
         ## Freeeze some parameters
         list_freeze_sets = [
-            self.embd_layer.bert_emb.parameters(),
+            # self.embd_layer.bert_emb.parameters(),
             # self.ans_infer.decoder.parameters(),
         ]
         for params in list_freeze_sets:
@@ -269,7 +269,7 @@ class NarrativeModel(plt.LightningModule):
         optimizer_grouped_parameters = [
             {
                 "params": params_decay,
-                "weight_decay": 0.95,
+                "weight_decay": self.w_decay,
             },
             {
                 "params": params_nodecay,
@@ -330,9 +330,9 @@ class NarrativeModel(plt.LightningModule):
         self.log("valid/meteor", meteor, on_epoch=True, prog_bar=False)
         self.log("valid/rouge_l", rouge_l, on_epoch=True, prog_bar=False)
 
-    def on_validation_end(self) -> None:
-        if self.current_epoch % self.switch_frequency == 0 and self.current_epoch != 0:
-            self.datamodule.switch_answerability()
+    # def on_validation_end(self) -> None:
+    #     if self.current_epoch % self.switch_frequency == 0 and self.current_epoch != 0:
+    #         self.datamodule.switch_answerability()
 
     def predict_step(
         self,

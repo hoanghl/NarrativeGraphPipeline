@@ -1,12 +1,107 @@
 from itertools import combinations
 from random import sample
-from typing import Any
 
 import numpy as np
 import torch
 import torch.nn as torch_nn
 import torch_geometric.nn as torch_g_nn
-from torch.nn.parameter import Parameter
+
+
+class GraphBasedLayer(torch_nn.Module):
+    def __init__(
+        self,
+        batch_size,
+        l_q,
+        l_a,
+        d_hid,
+        d_bert,
+        d_graph,
+        n_nodes,
+        n_edges,
+    ):
+        super().__init__()
+
+        self.bz = batch_size
+        self.n_nodes = n_nodes
+        self.n_edges = n_edges
+        self.d_hid = n_nodes
+        self.d_bert = d_bert
+
+        self.lin1 = torch_nn.Linear(d_bert * 2, d_hid, bias=False)
+
+        self.graph = GraphLayer(d_hid, d_graph, n_nodes)
+
+        self.lin2 = torch_nn.Linear(d_bert, l_a, bias=False)
+        self.lin3 = torch_nn.Linear(l_q, n_nodes, bias=False)
+        self.lin4 = torch_nn.Linear(d_hid, d_bert, bias=False)
+
+        self.edge_indx = self.gen_edges()
+
+    def forward(self, q, c):
+        # q : [b, l_q, d_bert]
+        # c: [b, n_c, d_bert]
+
+        (
+            b,
+            n_c,
+            _,
+        ) = c.size()
+
+        ######################################
+        # Use TransformerEncoder to encode q and c
+        ######################################
+        q_ = torch.mean(q, dim=1).unsqueeze(1).repeat(1, n_c, 1)
+        X = torch.cat((c, q_), dim=2)
+        # [b, n_c, d_bert*2]
+        X = self.lin1(X)
+        # [b, n_c, d_hid]
+
+        edge_indx = self.edge_indx[:b, :, :]
+        edge_len = torch.IntTensor([self.n_edges]).repeat(b)
+        # edge_indx         : [b, 2, n_edges]
+        # edge_len          : [b]
+
+        # Create node feat from tensor X
+        node_feats = []
+        for pair in combinations(range(n_c), 2):
+            idx1, idx2 = pair
+            node_feats.append(torch.cat([X[:, idx1, :], X[:, idx2, :]], dim=-1).unsqueeze(1))
+
+        node_feats = torch.cat(node_feats, dim=1)
+        # [b, n_nodes, d_hid*2]
+        node_len = torch.IntTensor([self.n_nodes]).repeat(b)
+        # [b]
+
+        ######################################
+        # Pass through Graph
+        ######################################
+        Y = self.graph(node_feats, edge_indx, node_len, edge_len)
+        # [b, n_nodes, d_hid]
+
+        Y = self.lin4(Y)
+        # [b, n_nodes, d_bert]
+
+        return Y
+
+    def gen_edges(self):
+        edge_pair = list(combinations(range(self.n_nodes), 2))
+        edges = sample(edge_pair, self.n_edges // 2)
+
+        vertex_s, vertex_d = [], []
+        for edge in edges:
+            s, d = edge
+            vertex_s.append(int(s))
+            vertex_d.append(int(d))
+
+            vertex_s.append(int(d))
+            vertex_d.append(int(s))
+
+        edge_index = np.array([vertex_s, vertex_d])
+        # [2, *]
+
+        edge_index = torch.from_numpy(edge_index).unsqueeze(0).repeat(self.bz, 1, 1)
+
+        return edge_index
 
 
 class GraphLayer(torch_nn.Module):
@@ -14,7 +109,7 @@ class GraphLayer(torch_nn.Module):
 
         super().__init__()
 
-        self.linear = torch_nn.Linear(d_hid * 3, d_graph)
+        self.linear = torch_nn.Linear(d_hid * 2, d_graph)
 
         # GCN
         self.gcn1 = torch_g_nn.GCNConv(d_graph, d_graph)
@@ -27,13 +122,13 @@ class GraphLayer(torch_nn.Module):
         self.linear2 = torch_nn.Linear(d_graph // 4, d_hid, bias=False)
 
     def forward(self, node_feat, edge_indx, node_len, edge_len):
-        # node_feat : [b, n_nodes, d_hid*3]
+        # node_feat : [b, n_nodes, d_hid * 2]
         # edge_indx : [b, 2, n_edges]
         # node_len  : [b]
         # edge_len  : [b]
 
-        b, n_nodes, d_hid = node_feat.shape
-        d_hid = d_hid // 3
+        b, n_nodes, d = node_feat.shape
+        d_hid = d // 2
 
         def gcn(node_feats, edge_indx):
             X = self.gcn1(node_feats, edge_indx)
@@ -71,7 +166,7 @@ class GraphLayer(torch_nn.Module):
         edge_len,
     ) -> tuple:
         """Convert batch of node features and edge indices into a big graph"""
-        # node_feat : [b, n_nodes, d_hid*3]
+        # node_feat : [b, n_nodes, d_hid*2]
         # node_len  : [b]
         # edge_indx : [b, 2, *]
         # edge_len  : [b]
@@ -111,69 +206,3 @@ class GraphLayer(torch_nn.Module):
             accum += node_len[b].item()
 
         return final_node_feat, final_edge_indx.long(), torch.LongTensor(batch_indx)
-
-
-class Memory(torch_nn.Module):
-    def __init__(
-        self,
-        batch_size,
-        n_nodes,
-        d_hid,
-        n_edges,
-    ):
-
-        super().__init__()
-
-        self.batch = batch_size
-        self.n_nodes = n_nodes
-        self.d_hid = d_hid
-        self.n_edges = n_edges
-
-        self.edge_len = torch.IntTensor([n_edges]).repeat(self.batch)
-
-        ## If load_statedict occurs, it will automatically load the following attributes
-        self.node_feats_mem = Parameter(
-            torch.rand(self.batch, self.n_nodes, self.d_hid), requires_grad=True
-        )
-        self.edge_index = Parameter(self.gen_edges(), requires_grad=True)
-
-    def forward(self):
-        pass
-
-    def update_mem(self, Y):
-        """Update memory with given tensor
-
-        Args:
-            Y (Tensor): output of Graph module
-        """
-        # Y: [b, n_nodes, d_hid]
-        b = Y.shape[0]
-        if b < self.batch:
-            tmp = self.node_feats_mem[b:, :, :]
-            Y = torch.cat((Y, tmp), dim=0)
-        # Y: [batch, n_nodes, d_hid]
-
-        self.node_feats_mem = torch.nn.parameter.Parameter(Y.detach(), requires_grad=True)
-
-    def gen_edges(self):
-        edge_pair = list(combinations(range(self.n_nodes), 2))
-        edges = sample(edge_pair, self.n_edges // 2)
-
-        vertex_s, vertex_d = [], []
-        for edge in edges:
-            s, d = edge
-            vertex_s.append(int(s))
-            vertex_d.append(int(d))
-
-            vertex_s.append(int(d))
-            vertex_d.append(int(s))
-
-        edge_index = np.array([vertex_s, vertex_d])
-        # [2, *]
-
-        edge_index = torch.from_numpy(edge_index).unsqueeze(0).repeat(self.batch, 1, 1)
-
-        return edge_index
-
-    def gets(self):
-        return self.node_feats_mem, self.edge_index, self.edge_len

@@ -85,5 +85,5 @@ class NarrativeDataModule(plt.LightningDataModule):
             sampler=CustomSampler(self.sizes_dataset["test"], n_shards=self.n_shards),
         )
 
-    def switch_answerability(self):
-        self.data_train.switch_answerability()
+    # def switch_answerability(self):
+    #     self.data_train.switch_answerability()
