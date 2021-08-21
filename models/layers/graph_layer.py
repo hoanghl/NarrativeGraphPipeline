@@ -7,79 +7,90 @@ import torch.nn as torch_nn
 import torch_geometric.nn as torch_g_nn
 
 
-class GraphBasedLayer(torch_nn.Module):
-    def __init__(
-        self,
-        batch_size,
-        l_q,
-        l_a,
-        d_hid,
-        d_bert,
-        d_graph,
-        n_nodes,
-        n_edges,
-    ):
+class GraphBasedReasoningLayer(torch_nn.Module):
+    def __init__(self, batch_size, d_hid, d_bert, d_graph, n_nodes, n_edges, dropout):
         super().__init__()
 
         self.bz = batch_size
         self.n_nodes = n_nodes
         self.n_edges = n_edges
-        self.d_hid = n_nodes
-        self.d_bert = d_bert
-
-        self.lin1 = torch_nn.Linear(d_bert * 2, d_hid, bias=False)
-
-        self.graph = GraphLayer(d_hid, d_graph, n_nodes)
-
-        self.lin2 = torch_nn.Linear(d_bert, l_a, bias=False)
-        self.lin3 = torch_nn.Linear(l_q, n_nodes, bias=False)
-        self.lin4 = torch_nn.Linear(d_hid, d_bert, bias=False)
-
+        self.d_hid = d_hid
         self.edge_indx = self.gen_edges()
 
-    def forward(self, q, c):
-        # q : [b, l_q, d_bert]
-        # c: [b, n_c, d_bert]
+        self.graph = GraphLayer(d_hid, d_graph, n_nodes)
+        self.lin1 = torch_nn.Linear(d_bert, d_hid, bias=False)
+        self.lin2 = torch_nn.Linear(d_hid, d_bert, bias=False)
+        self.ff = torch_nn.Sequential(
+            torch_nn.Linear(d_bert * 2, d_bert * 2),
+            torch_nn.Tanh(),
+            torch_nn.Dropout(dropout),
+            torch_nn.Linear(d_bert * 2, d_bert),
+        )
 
-        (
-            b,
-            n_c,
-            _,
-        ) = c.size()
+    def forward(self, c):
+        # c: [b, n_c, l_c, d_bert]
+
+        b, n_c, l_c, d_bert = c.size()
 
         ######################################
         # Use TransformerEncoder to encode q and c
         ######################################
-        q_ = torch.mean(q, dim=1).unsqueeze(1).repeat(1, n_c, 1)
-        X = torch.cat((c, q_), dim=2)
-        # [b, n_c, d_bert*2]
+        X = torch.max(c, dim=2)[0]
+        # [b, n_c, d_bert]
         X = self.lin1(X)
         # [b, n_c, d_hid]
 
-        edge_indx = self.edge_indx[:b, :, :]
-        edge_len = torch.IntTensor([self.n_edges]).repeat(b)
-        # edge_indx         : [b, 2, n_edges]
-        # edge_len          : [b]
-
         # Create node feat from tensor X
         node_feats = []
+        idx1, idx2 = [], []
         for pair in combinations(range(n_c), 2):
-            idx1, idx2 = pair
-            node_feats.append(torch.cat([X[:, idx1, :], X[:, idx2, :]], dim=-1).unsqueeze(1))
+            idx1_, idx2_ = pair
+            node_feats.append(torch.cat([X[:, idx1_, :], X[:, idx2_, :]], dim=-1).unsqueeze(1))
+
+            idx1.append(idx1_)
+            idx2.append(idx2_)
 
         node_feats = torch.cat(node_feats, dim=1)
         # [b, n_nodes, d_hid*2]
-        node_len = torch.IntTensor([self.n_nodes]).repeat(b)
+        node_len = torch.tensor([self.n_nodes], dtype=torch.long, device=c.device).repeat(b)
         # [b]
+        edge_len = torch.tensor([self.n_edges], dtype=torch.long, device=c.device).repeat(b)
+        edge_indx = self.edge_indx[:b, :, :].type_as(edge_len)
+        # edge_indx         : [b, 2, n_edges]
+        # edge_len          : [b]
 
         ######################################
         # Pass through Graph
         ######################################
-        Y = self.graph(node_feats, edge_indx, node_len, edge_len)
+        output = self.graph(node_feats, edge_indx, node_len, edge_len)
         # [b, n_nodes, d_hid]
 
-        Y = self.lin4(Y)
-        # [b, n_nodes, d_bert]
+        ######################################
+        # Accumulate nodes formed by same para
+        # to form weak attention hidden representation
+        ######################################
+        indx = torch.tensor([idx1, idx2], device=c.device, dtype=torch.long)
+        weak_att_hid = torch.zeros(b, n_c, self.d_hid, device=c.device)
+        for idx_ in indx:
+            weak_att_hid.index_add_(dim=1, index=idx_, source=output)
+        # [b, n_c, d_hid]
+
+        weak_att_hid = self.lin2(weak_att_hid)
+        # [b, n_c, d_bert]
+
+        ######################################
+        # Concate eak attention hidden representation
+        # to each token in each para of context
+        # and create final representation Y
+        ######################################
+        weak_att_hid = weak_att_hid.unsqueeze(2).repeat(1, 1, l_c, 1)
+        # [b, n_c, l_c, d_bert]
+
+        Y = torch.cat([c, weak_att_hid], dim=-1)
+        # [b, n_c, l_c, d_bert * 2]
+
+        Y = self.ff(Y.view(b, -1, d_bert * 2))
+        # [b, n_c*l_c, d_bert]
 
         return Y
 

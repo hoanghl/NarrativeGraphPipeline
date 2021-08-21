@@ -9,7 +9,7 @@ from transformers import AdamW, BertTokenizer, get_linear_schedule_with_warmup
 from datamodules.narrative_datamodule import NarrativeDataModule
 from models.layers.ans_infer_layer import BertDecoder
 from models.layers.finegrain_layer import FineGrain
-from models.layers.graph_layer import GraphBasedLayer
+from models.layers.graph_layer import GraphBasedReasoningLayer
 from utils.model_utils import get_scores, ipot
 
 
@@ -17,8 +17,6 @@ class NarrativeModel(plt.LightningModule):
     def __init__(
         self,
         batch_size,
-        l_q,
-        l_c,
         l_a,
         n_nodes,
         n_edges,
@@ -29,6 +27,7 @@ class NarrativeModel(plt.LightningModule):
         d_graph,
         lr,
         w_decay,
+        dropout,
         size_dataset_train,
         max_epochs,
         warmup_rate,
@@ -42,7 +41,6 @@ class NarrativeModel(plt.LightningModule):
         super().__init__()
 
         self.batch_size = batch_size
-        self.l_a = l_a
         self.d_vocab = d_vocab
         self.lr = lr
         self.w_decay = w_decay
@@ -61,28 +59,25 @@ class NarrativeModel(plt.LightningModule):
         #############################
         self.embd_layer = FineGrain(
             l_a=l_a,
-            l_c=l_c,
             n_gru_layers=n_gru_layers,
             d_bert=d_bert,
             d_hid=d_hid,
             path_pretrained=path_pretrained,
         )
-        self.reasoning = GraphBasedLayer(
+        self.reasoning = GraphBasedReasoningLayer(
             batch_size=batch_size,
-            l_q=l_q,
-            l_a=l_a,
             d_hid=d_hid,
             d_bert=d_bert,
             d_graph=d_graph,
             n_nodes=n_nodes,
             n_edges=n_edges,
+            dropout=dropout,
         )
         self.ans_infer = BertDecoder(
             l_a=l_a,
             d_bert=d_bert,
             d_vocab=d_vocab,
-            cls_tok_id=self.bert_tokenizer.cls_token_id,
-            sep_tok_id=self.bert_tokenizer.sep_token_id,
+            tokenizer=self.bert_tokenizer,
             embd_layer=self.embd_layer,
         )
 
@@ -127,9 +122,7 @@ class NarrativeModel(plt.LightningModule):
             rouge_l / n_samples,
         )
 
-    def get_prediction(self, output_mle, a1_ids, a2_ids):
-        prediction = torch.argmax(output_mle, dim=1)
-
+    def get_prediction(self, output, a1_ids, a2_ids):
         prediction = [
             {
                 "pred": " ".join(self.bert_tokenizer.convert_ids_to_tokens(pred_)),
@@ -138,7 +131,7 @@ class NarrativeModel(plt.LightningModule):
                     " ".join(self.bert_tokenizer.convert_ids_to_tokens(ans2_)),
                 ],
             }
-            for pred_, ans1_, ans2_ in zip(prediction.squeeze(1), a1_ids, a2_ids)
+            for pred_, ans1_, ans2_ in zip(output.squeeze(1), a1_ids, a2_ids)
         ]
 
         return prediction
@@ -192,14 +185,13 @@ class NarrativeModel(plt.LightningModule):
             c_masks=c_masks,
         )
         # q: [b, l_q, d_bert]
-        # c: [b, n_c, d_bert]
-        # a: [b, l_a, d_bert]
+        # c: [b, n_c, l_c, d_bert]
 
         ####################
         # Do reasoning
         ####################
-        Y = self.reasoning(q, c)
-        # [b, n_nodes, d_bert]
+        Y = self.reasoning(c)
+        # [b, n_c*l_c, d_bert]
 
         ####################
         # Generate answer
@@ -235,7 +227,7 @@ class NarrativeModel(plt.LightningModule):
         return {
             "loss": loss,
             "pred": (
-                output_mle.cpu().detach(),
+                torch.argmax(output_mle, dim=1).cpu().detach(),
                 a1_ids.cpu().detach(),
                 a2_ids.cpu().detach(),
             ),

@@ -50,7 +50,7 @@ trainer:
   gpus: 1
   min_epochs: 1
   max_epochs: 30
-  precision: 16
+  # precision: 16
   auto_lr_find: False
   terminate_on_nan: True
   log_every_n_steps: 40
@@ -65,17 +65,16 @@ trainer:
 model:
   _target_: models.narrative_model.NarrativeModel
   batch_size: ${batch_size}
-  l_q: ${l_q}
-  l_c: ${l_c}
   l_a: ${l_a}
   n_nodes: 45
-  n_edges: 40
+  n_edges: 200
   n_gru_layers: 5
   d_hid: 64
   d_bert: 768
   d_vocab: 30522
   d_graph: 1024
   lr: 1e-5
+  dropout: 0.15
   w_decay: 0.95
   warmup_rate: 0.2
   size_dataset_train: ${sizes_dataset.train}
@@ -118,7 +117,7 @@ logger:
   tensorboard:
     _target_: pytorch_lightning.loggers.tensorboard.TensorBoardLogger
     save_dir: "tensorboard/"
-    name: "default"
+    name: ${now:%A %b-%d %H:%M}
     version: null
     log_graph: False
     default_hp_metric: True

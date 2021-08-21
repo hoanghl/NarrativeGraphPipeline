@@ -10,32 +10,28 @@ class BertDecoder(torch_nn.Module):
         l_a,
         d_bert,
         d_vocab,
-        cls_tok_id,
-        sep_tok_id,
+        tokenizer,
         embd_layer,
     ):
         super().__init__()
 
-        self.cls_tok_id = cls_tok_id
-        self.sep_tok_id = sep_tok_id
+        self.cls_tok_id = tokenizer.cls_token_id
+        self.sep_tok_id = tokenizer.sep_token_id
 
         self.d_vocab = d_vocab
         self.l_a = l_a
-        self.t = -1
 
         self.embd_layer = embd_layer
 
         bert_conf = BertConfig()
         bert_conf.is_decoder = True
         bert_conf.add_cross_attention = True
-        bert_conf.num_attention_heads = 6
-        bert_conf.num_hidden_layers = 6
         self.decoder = BertModel(config=bert_conf)
 
         self.ff = torch_nn.Linear(d_bert, d_vocab)
 
     def forward(self, Y, a_ids, a_masks=None):
-        # Y: [b, n_nodes, d_bert]
+        # Y: [b, n_c*l_c, d_bert]
         # a_ids : [b, seq_len]
         # a_masks: [b, seq_len]
 
@@ -59,7 +55,7 @@ class BertDecoder(torch_nn.Module):
         cur_step: int,
         max_step: int,
     ):
-        # Y: [b, n_nodes, d_bert]
+        # Y: [b, n_c*l_c, d_bert]
         # a_ids: [b, l_a]
         # a_masks: [b, l_a]
 
@@ -106,16 +102,16 @@ class BertDecoder(torch_nn.Module):
         # output: [b, 1]
         # a_ids   : [b, l_a]
 
-        self.t = (
+        t = (
             np.random.binomial(1, cur_step / max_step)
             if max_step != 0
             else np.random.binomial(1, 1)
         )
 
-        return a_ids[:, ith].unsqueeze(1) if self.t == 0 else output
+        return a_ids[:, ith].unsqueeze(1) if t == 0 else output
 
     def do_predict(self, Y):
-        # Y: [b, n_nodes, d_bert]
+        # Y: [b, n_c*l_c, d_bert]
 
         b = Y.size(0)
 

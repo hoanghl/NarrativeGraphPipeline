@@ -1,5 +1,12 @@
 ### This file contains changes and modifications during developing.
 
+## Aug 21, 23:01
+
+- Remove some redundant _GRU_ layers in module _FineGrain_
+- Change shape of _context_ from **[b, n_c, d_bert]** to **[b, n_c, l_c, d_bert]**
+- Add **Weak Attention hidden representation** into module _Reasoning_
+- Add some other modifications
+
 ## Aug 20, 22:25
 
 - Discard _memory component_ in _Graph reasoning module_

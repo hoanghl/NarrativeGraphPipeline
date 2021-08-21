@@ -13,7 +13,6 @@ class FineGrain(torch_nn.Module):
     def __init__(
         self,
         l_a,
-        l_c,
         n_gru_layers,
         d_bert,
         d_hid,
@@ -31,21 +30,7 @@ class FineGrain(torch_nn.Module):
             batch_first=True,
             bidirectional=True,
         )
-        self.biGRU_attn = torch_nn.GRU(
-            d_bert,
-            d_bert // 2,
-            num_layers=n_gru_layers,
-            batch_first=True,
-            bidirectional=True,
-        )
-        self.biGRU_mask = torch_nn.GRU(
-            d_bert,
-            d_bert // 2,
-            num_layers=n_gru_layers,
-            batch_first=True,
-            bidirectional=True,
-        )
-        self.lin_attn = torch_nn.Linear(d_bert * 2, l_c)
+
         self.lin1 = torch_nn.Sequential(
             torch_nn.Linear(d_bert, d_bert),
             torch_nn.Tanh(),
@@ -53,16 +38,13 @@ class FineGrain(torch_nn.Module):
             torch_nn.Linear(d_bert, d_hid // 2),
         )
 
-    def forward(self):
-        return
-
     def encode_ques_para(self, q_ids, c_ids, q_masks, c_masks):
         # q_ids: [b, l_q]
         # c_ids: [b, n_c, l_c]
         # q_masks: [b, l_q]
         # c_masks: [b, n_c, l_c]
 
-        b, n_c, l_c = c_ids.shape
+        n_c = c_ids.size(1)
 
         q = self.bert_emb(input_ids=q_ids, attention_mask=q_masks)[0]
         # q  : [b, l_q, d_bert]
@@ -104,39 +86,8 @@ class FineGrain(torch_nn.Module):
 
             paragraphs.append(C_s)
 
-        c = torch.cat((paragraphs), dim=1)
+        c = torch.cat(paragraphs, dim=1)
         # [b, n_c, l_c, d_bert]
-
-        #########################
-        # Reduce 'c' by applying attentive method
-        # based on 'q'
-        #########################
-        q_ = torch.mean(q, dim=1)
-        # [b, d_bert]
-
-        context_ = c.reshape(-1, l_c, self.d_bert)
-        # paras_len = torch.sum(paras_mask, dim=2).reshape(-1).to("cpu")
-        # context_    : [b*n_c, l_c, d_bert]
-        # paras_mask: [b*n_c]
-
-        context_ = self.biGRU_mask(context_)[0]
-        # [b*n_c, l_c, d_bert]
-
-        paras_first = context_[:, 0, :].reshape(b, n_c, -1)
-        # [b, n_c, d_bert]
-
-        q_ = q_.unsqueeze(1).repeat(1, n_c, 1)
-        # [b, n_c, d_bert]
-        selector = torch.cat((q_, paras_first), dim=2)
-        # [b, n_c, d_bert*2]
-        selector = self.lin_attn(selector)
-        # [b, n_c, l_c]
-
-        selector = selector.unsqueeze(3).repeat(1, 1, 1, self.d_bert)
-        # [b, n_c, l_c, d_bert]
-
-        c = torch.sum(c * selector, dim=2)
-        # [b, n_c, d_bert]
 
         return q, c
 
