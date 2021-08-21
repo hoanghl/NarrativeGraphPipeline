@@ -1,7 +1,4 @@
-# CHANGELOG
+## Aug 21, 11:04
 
-### This file contains changes and modifications during developing.
-
-## Feb 3 2021, 11:00 AM
-- Very first commit
-- Add default files: `.gitignore`, `CHANGELOG.md`, `configs.py`, `launcher.sh` and `README.md`
+- First commit
+- Project uses data version v4.3
