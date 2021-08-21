@@ -1,6 +1,6 @@
-from torch.nn.parameter import Parameter
-import torch.nn as torch_nn
 import torch
+import torch.nn as torch_nn
+from torch.nn.parameter import Parameter
 
 
 class SelfAttnQueryRetrv(torch_nn.Module):
@@ -120,7 +120,6 @@ class Reasoning(torch_nn.Module):
             torch_nn.Dropout(dropout),
         )
         self.lin1 = torch_nn.Linear(2 * d_hid, 2 * d_hid)
-        self.gru = torch_nn.GRU(d_hid, d_hid, batch_first=True, bidirectional=True)
 
     def forward(self, q, c):
         # q: [b, l_q, d_hid]
@@ -158,11 +157,13 @@ class Reasoning(torch_nn.Module):
 
         # NOTE: If the result not good, consider discarding the following
         ## Pass through GRU to get the final representation for context
-        output = self.gru(c)[1].transpose(0, 1)
+        # output = self.gru(c)[1].transpose(0, 1)
         # [b, 2, d_hid]
 
         # NOTE: If the result not good, using FM instead of sum
-        output = torch.sum(output, dim=1, keepdim=True)
+        # output = torch.sum(output, dim=1, keepdim=True)
         # [b, 1, d_hid]
+
+        output = c
 
         return output

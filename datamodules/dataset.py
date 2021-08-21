@@ -1,10 +1,10 @@
-from random import sample
 import glob
+from random import sample
 
-from torch.utils.data import Dataset
-import torch
-import pandas as pd
 import numpy as np
+import pandas as pd
+import torch
+from torch.utils.data import Dataset
 
 
 class NarrativeDataset(Dataset):
@@ -37,7 +37,7 @@ class NarrativeDataset(Dataset):
         self.c_ids = None
         self.c_masks = None
 
-        self.exchange_rate = 0
+        self.exchange_rate = 0.5
 
     def __len__(self) -> int:
         return self.size_dataset
@@ -131,5 +131,5 @@ class NarrativeDataset(Dataset):
             self.c_ids.append(c_ids)
             self.c_masks.append(c_masks)
 
-    def switch_answerability(self):
-        self.exchange_rate = min((1, self.exchange_rate + 0.25))
+    # def switch_answerability(self):
+    #     self.exchange_rate = min((1, self.exchange_rate + 0.25))

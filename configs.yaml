@@ -39,18 +39,23 @@ l_c: 180
 l_a: 12
 n_c: 10
 
+sizes_dataset:
+  train: 32747
+  test: 10557
+  valid: 3461
+
 trainer:
   _target_: pytorch_lightning.Trainer
   gpus: 1
   min_epochs: 1
-  max_epochs: 100
+  max_epochs: 60
+  precision: 16
   auto_lr_find: False
   terminate_on_nan: True
   log_every_n_steps: 40
   auto_scale_batch_size: False
   gradient_clip_val: 1.0
   accelerator: null
-  precision: 16
   check_val_every_n_epoch: 1
   reload_dataloaders_every_epoch: True
   weights_summary: "top"
@@ -58,33 +63,29 @@ trainer:
   resume_from_checkpoint: ${PATH.log}/last_best.ckpt
 
 model:
-  _target_: model_utils.narrative_model.NarrativeModel
+  _target_: models.narrative_model.NarrativeModel
   batch_size: ${batch_size}
   l_q: ${l_q}
   l_c: ${l_c}
   l_a: ${l_a}
-  n_c: ${n_c}
   n_heads: 4
   d_hid: 64
   d_bert: 768
   d_vocab: 30522
   lr: 1e-5
-  w_decay: 1e-2
   dropout: 0.2
-  beam_size: 20
-  n_gram_beam: 8
+  size_dataset_train: ${sizes_dataset.train}
+  max_epochs: ${trainer.max_epochs}
+  warmup_rate: 0.25
   path_pretrained: ${PATH.pretrained}
   path_pred: ${PATH.log}/pred.json
   path_train_pred: ${PATH.log}/train_pred.json
   path_valid_pred: ${PATH.log}/valid_pred.json
 
 datamodule:
-  _target_: data_utils.narrative_datamodule.NarrativeDataModule
+  _target_: datamodules.narrative_datamodule.NarrativeDataModule
   batch_size: ${batch_size}
-  sizes_dataset:
-    train: 32747
-    test: 10557
-    valid: 3461
+  sizes_dataset: ${sizes_dataset}
   l_c: ${l_c}
   n_c: ${n_c}
   n_shards: ${n_shards}
@@ -97,8 +98,11 @@ callbacks:
     save_top_k: 2
     save_last: True
     mode: "min"
-    dirpath: ${PATH.log}/tensorboard/ckpts/
+    dirpath: ckpts/
     filename: "narrative_weam-{epoch:02d}"
+  LearningRateMonitor:
+    _target_: pytorch_lightning.callbacks.LearningRateMonitor
+    logging_interval: step
   # EarlyStopping:
   #   _target_: pytorch_lightning.callbacks.EarlyStopping
   #   monitor: valid/bleu_1
@@ -110,15 +114,15 @@ callbacks:
 logger:
   tensorboard:
     _target_: pytorch_lightning.loggers.tensorboard.TensorBoardLogger
-    save_dir: ${PATH.log}/tensorboard/
+    save_dir: tensorboard/
     name: default
-    version: null
+    name: ${now:%A %b-%d %H:%M}
     log_graph: False
     default_hp_metric: False
   wandb:
     _target_: pytorch_lightning.loggers.wandb.WandbLogger
     project: "narrative_weam"
-    name: narrative_weam-${now:%b-%d:%H-%M}
+    name: ${now:%A %b-%d %H:%M}
     save_dir: "."
     offline: False # set True to store all logs only locally
     id: null # pass correct id to resume experiment!

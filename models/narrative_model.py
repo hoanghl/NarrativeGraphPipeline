@@ -1,19 +1,22 @@
-from typing import Any, Optional
 import json
+import os
+from typing import Any, Optional
 
-from transformers import AdamW, BertTokenizer
 import pytorch_lightning as plt
-import torch.nn as torch_nn
 import torch
+import torch.nn as torch_nn
+from datamodules.narrative_datamodule import NarrativeDataModule
+from transformers import (
+    AdamW,
+    BertTokenizer,
+    get_cosine_with_hard_restarts_schedule_with_warmup,
+    get_linear_schedule_with_warmup,
+)
+from utils.model_utils import get_scores, ipot
 
-
-from data_utils.narrative_datamodule import NarrativeDataModule
-from model_utils.layers.reasoning_layer import Reasoning
-from model_utils.layers.bertbasedembd_layer import BertBasedEmbedding
-from model_utils.layers.ans_infer_layer import Decoder
-from utils.model_utils import ipot, get_scores
-
-EPSILON = 10e-10
+from models.layers.ans_infer_layer import Decoder
+from models.layers.bertbasedembd_layer import BertBasedEmbedding
+from models.layers.reasoning_layer import Reasoning
 
 
 class NarrativeModel(plt.LightningModule):
@@ -28,15 +31,14 @@ class NarrativeModel(plt.LightningModule):
         d_bert,
         d_vocab,
         lr,
-        w_decay,
         dropout,
-        beam_size,
-        n_gram_beam,
+        size_dataset_train,
+        max_epochs,
+        warmup_rate,
         path_pretrained,
         path_pred,
         path_train_pred,
         path_valid_pred,
-        datamodule,
         **kwargs
     ):
 
@@ -44,17 +46,17 @@ class NarrativeModel(plt.LightningModule):
 
         self.d_vocab = d_vocab
         self.lr = lr
-        self.w_decay = w_decay
-        self.beam_size = beam_size
-        self.n_gram_beam = n_gram_beam
         self.l_a = l_a
-
+        self.batch_size = batch_size
+        self.size_dataset_train = size_dataset_train
+        self.max_epochs = max_epochs
+        self.warmup_rate = warmup_rate
         self.path_pred = path_pred
         self.path_train_pred = path_train_pred
         self.path_valid_pred = path_valid_pred
-
         self.bert_tokenizer = BertTokenizer.from_pretrained(path_pretrained)
-        self.datamodule: NarrativeDataModule = datamodule
+
+        os.makedirs(path_valid_pred, exist_ok=True)
 
         #############################
         # Define model
@@ -71,19 +73,16 @@ class NarrativeModel(plt.LightningModule):
             device=self.device,
         )
         self.ans_infer = Decoder(
-            batch_size=batch_size,
             l_a=l_a,
             d_vocab=d_vocab,
             d_hid=d_hid,
             tokenizer=self.bert_tokenizer,
             embd_layer=self.embd_layer,
-            beam_size=beam_size,
-            device=self.device,
         )
 
         ## Freeeze some parameters
         list_freeze_sets = [
-            self.embd_layer.bert_emb.parameters(),
+            # self.embd_layer.bert_emb.parameters(),
             # self.ans_infer.decoder.parameters(),
         ]
         for params in list_freeze_sets:
@@ -93,9 +92,7 @@ class NarrativeModel(plt.LightningModule):
         #############################
         # Define things
         #############################
-        self.criterion = torch_nn.CrossEntropyLoss(
-            ignore_index=self.bert_tokenizer.pad_token_id
-        )
+        self.criterion = torch_nn.CrossEntropyLoss(ignore_index=self.bert_tokenizer.pad_token_id)
 
     ####################################################################
     # FOR TRAINING PURPOSE
@@ -114,14 +111,13 @@ class NarrativeModel(plt.LightningModule):
         ans = self.embd_layer.encode_ans(input_ids=a_ids, input_masks=a_masks)
         # [b, l_a-1, d_hid]
 
-        loss_ot = ipot(output_ot, ans, max_iter=500)
+        loss_ot = ipot(output_ot, ans, max_iter=200)
 
         total_loss = loss_mle + gamma * loss_ot
 
         return total_loss
 
-    def get_prediction(self, output_mle, a1_ids, a2_ids):
-        _, prediction = torch.topk(output_mle, 1, dim=1)
+    def get_prediction(self, output, a1_ids, a2_ids):
 
         prediction = [
             {
@@ -131,7 +127,7 @@ class NarrativeModel(plt.LightningModule):
                     " ".join(self.bert_tokenizer.convert_ids_to_tokens(ans2_)),
                 ],
             }
-            for pred_, ans1_, ans2_ in zip(prediction.squeeze(1), a1_ids, a2_ids)
+            for pred_, ans1_, ans2_ in zip(output.squeeze(1), a1_ids, a2_ids)
         ]
 
         return prediction
@@ -202,7 +198,7 @@ class NarrativeModel(plt.LightningModule):
         ####################
 
         return (
-            self.ans_infer.do_predict(Y=Y)
+            self.ans_infer.do_predict(Y=Y, a_masks=a1_masks)
             if is_predict
             else self.ans_infer.do_train(
                 Y=Y,
@@ -214,28 +210,26 @@ class NarrativeModel(plt.LightningModule):
         )
         # pred: [b, d_vocab, l_a - 1]
 
-    def training_step(self, batch: Any, batch_idx):
-        a1_ids = batch["a1_ids"]
-        a2_ids = batch["a2_ids"]
-        a1_masks = batch["a1_masks"]
-
+    def training_step(self, batch: Any, batch_idx: int):
         output_mle, output_ot = self(
             **batch,
             cur_step=batch_idx,
-            max_step=self.datamodule.data_train.size_dataset
-            // self.datamodule.batch_size,
+            max_step=self.size_dataset_train // self.batch_size,
         )
         # output_ot: [b, l_a - 1, d_hid]
         # output_mle: [b, d_vocab, l_a - 1]
 
-        loss = self.get_loss(output_mle, output_ot, a1_ids[:, 1:], a1_masks[:, 1:])
+        a1_ids = batch["a1_ids"]
+        a2_ids = batch["a2_ids"]
+        a1_masks = batch["a1_masks"]
+        loss = self.get_loss(output_mle, output_ot, a1_ids, a1_masks)
 
         self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=False)
 
         return {
             "loss": loss,
             "pred": (
-                output_mle.cpu().detach(),
+                torch.argmax(output_mle, dim=1).cpu().detach(),
                 a1_ids.cpu().detach(),
                 a2_ids.cpu().detach(),
             ),
@@ -260,27 +254,14 @@ class NarrativeModel(plt.LightningModule):
         return 0
 
     def validation_step(self, batch: Any, batch_idx):
-        a1_ids = batch["a1_ids"]
-        a2_ids = batch["a2_ids"]
-        a1_masks = batch["a1_masks"]
-
-        output_mle, output_ot = self(
-            **batch,
-            is_predict=True,
-        )
+        output_mle, output_ot = self(**batch, is_predict=True)
         # output_ot: [b, l_a - 1, d_hid]
         # output_mle: [b, d_vocab, l_a - 1]
 
-        loss = self.get_loss(output_mle, output_ot, a1_ids[:, 1:], a1_masks[:, 1:])
-
-        self.log(
-            "valid/loss",
-            loss,
-            on_step=False,
-            on_epoch=True,
-            prog_bar=False,
-            # sync_dist=True,
-        )
+        a1_ids = batch["a1_ids"]
+        a2_ids = batch["a2_ids"]
+        a1_masks = batch["a1_masks"]
+        loss = self.get_loss(output_mle, output_ot, a1_ids, a1_masks)
 
         return {
             "loss": loss,
@@ -305,21 +286,41 @@ class NarrativeModel(plt.LightningModule):
         self.log("valid/meteor", meteor, on_epoch=True, prog_bar=False)
         self.log("valid/rouge_l", rouge_l, on_epoch=True, prog_bar=False)
 
-    def on_validation_epoch_end(self) -> None:
-        # TODO: Find the way to finish
-        if self.current_epoch % 6 == 0 and self.current_epoch != 0:
-            self.datamodule.switch_answerability()
-
     def configure_optimizers(self):
-        optimizer = AdamW(
-            params=self.parameters(), lr=self.lr, weight_decay=self.w_decay
-        )
-        return {
-            "optimizer": optimizer,
-            "lr_scheduler": torch.optim.lr_scheduler.CosineAnnealingLR(
-                optimizer, T_max=60, eta_min=0
+        no_decay = ["bias", "LayerNorm.weight"]
+        params_decay, params_nodecay = [], []
+        for model in [self.embd_layer, self.reasoning, self.ans_infer]:
+            for n, p in model.named_parameters():
+                if not any(nd in n for nd in no_decay):
+                    params_decay.append(p)
+                else:
+                    params_nodecay.append(p)
+
+        optimizer_grouped_parameters = [
+            {
+                "params": params_decay,
+                "weight_decay": 0.95,
+            },
+            {
+                "params": params_nodecay,
+                "weight_decay": 0.0,
+            },
+        ]
+        optimizer = AdamW(params=optimizer_grouped_parameters, lr=self.lr)
+
+        n_training_steps = self.size_dataset_train // self.batch_size * self.max_epochs
+        lr_scheduler = {
+            "scheduler": get_cosine_with_hard_restarts_schedule_with_warmup(
+                optimizer,
+                num_warmup_steps=int(n_training_steps * self.warmup_rate),
+                num_training_steps=n_training_steps,
+                num_cycles=6,
             ),
+            "name": "learning_rate",
+            "interval": "step",
+            "frequency": 1,
         }
+        return [optimizer], [lr_scheduler]
 
     def predict_step(
         self,
@@ -334,12 +335,11 @@ class NarrativeModel(plt.LightningModule):
             **batch,
             is_predict=True,
         )
-        # output_ot: [b, l_a - 1, d_hid]
-        # output_mle: [b, d_vocab, l_a - 1]
+        # [b, d_vocab, l_a - 1]
 
         return {
             "pred": (
-                output_mle.cpu().detach(),
+                torch.argmax(output_mle, dim=1).cpu().detach(),
                 a1_ids.cpu().detach(),
                 a2_ids.cpu().detach(),
             ),

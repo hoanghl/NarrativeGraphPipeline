@@ -2,6 +2,14 @@
 
 ### This file contains changes and modifications during developing.
 
+## Aug 21, 23:38
+
+- Modify and add some configurations
+- Organize some files into new location
+- Use **fixed Hn-En 50-50** strategy
+- Use new _learning rate scheduler_
+- Change shape of output of reasoning from **[b, n_c, d_hid]** to **[b, n_c * l_c d_hid]**
+
 ## July 23 2021, 16:51
 
 - Use data **v4.3**: change value of many fields
