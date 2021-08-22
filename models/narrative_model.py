@@ -34,7 +34,6 @@ class NarrativeModel(plt.LightningModule):
         path_pretrained,
         path_train_pred,
         path_valid_pred,
-        datamodule: NarrativeDataModule = None,
         **kwargs
     ):
 
@@ -49,7 +48,6 @@ class NarrativeModel(plt.LightningModule):
         self.warmup_rate = warmup_rate
 
         self.bert_tokenizer = BertTokenizer.from_pretrained(path_pretrained)
-        self.datamodule = datamodule
 
         self.path_train_pred = path_train_pred
         self.path_valid_pred = path_valid_pred
@@ -212,7 +210,7 @@ class NarrativeModel(plt.LightningModule):
         output_mle, output_ot = self(
             **batch,
             cur_step=batch_idx,
-            max_step=self.datamodule.data_train.size_dataset // self.datamodule.batch_size,
+            max_step=self.size_dataset_train // self.batch_size,
         )
         # output_ot: [b, l_a - 1, d_hid]
         # output_mle: [b, d_vocab, l_a - 1]
@@ -301,7 +299,7 @@ class NarrativeModel(plt.LightningModule):
         return {
             "loss": loss,
             "pred": (
-                output_mle.cpu().detach(),
+                torch.argmax(output_mle, dim=1).cpu().detach(),
                 a1_ids.cpu().detach(),
                 a2_ids.cpu().detach(),
             ),
