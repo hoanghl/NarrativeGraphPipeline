@@ -150,20 +150,9 @@ class Reasoning(torch_nn.Module):
             c_i = torch.softmax(A, dim=-2).transpose(-1, -2) @ q
             # [b, l_c, d_hid]
 
-            c_.append(c.unsqueeze(1))
+            c_.append(c_i.unsqueeze(1))
 
-        c = torch.cat(c_, dim=1).view(b, -1, d_hid)
+        Y = torch.cat(c_, dim=1).view(b, -1, d_hid)
         # [b, n_c*l_c, d_hid]
 
-        # NOTE: If the result not good, consider discarding the following
-        ## Pass through GRU to get the final representation for context
-        # output = self.gru(c)[1].transpose(0, 1)
-        # [b, 2, d_hid]
-
-        # NOTE: If the result not good, using FM instead of sum
-        # output = torch.sum(output, dim=1, keepdim=True)
-        # [b, 1, d_hid]
-
-        output = c
-
-        return output
+        return Y

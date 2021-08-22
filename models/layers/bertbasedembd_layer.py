@@ -1,7 +1,7 @@
-from transformers import BertModel
-import transformers
-import torch.nn as torch_nn
 import torch
+import torch.nn as torch_nn
+import transformers
+from transformers import BertModel
 
 transformers.logging.set_verbosity_error()
 
@@ -16,7 +16,7 @@ class BertBasedEmbedding(torch_nn.Module):
 
         ## Modules for embedding
         self.bert_emb = BertModel.from_pretrained(path_pretrained)
-        self.lin1 = torch_nn.Linear(d_bert, d_hid)
+        self.lin1 = torch_nn.Linear(d_bert, d_hid, bias=False)
 
     def forward(self):
         return

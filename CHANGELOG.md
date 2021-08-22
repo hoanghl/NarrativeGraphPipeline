@@ -2,6 +2,12 @@
 
 ### This file contains changes and modifications during developing.
 
+## Aug 22, 18:45
+
+- Replace BertDecoder by LSTM with PGN, no Sched Sampling
+- Increase d_hid to 256
+- Some some errors in typo
+
 ## Aug 21, 23:38
 
 - Modify and add some configurations

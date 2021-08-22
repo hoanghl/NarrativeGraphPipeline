@@ -76,6 +76,7 @@ class NarrativeModel(plt.LightningModule):
             l_a=l_a,
             d_vocab=d_vocab,
             d_hid=d_hid,
+            dropout=dropout,
             tokenizer=self.bert_tokenizer,
             embd_layer=self.embd_layer,
         )
@@ -99,21 +100,23 @@ class NarrativeModel(plt.LightningModule):
     ####################################################################
 
     def get_loss(self, output_mle, output_ot, a_ids, a_masks, gamma=0.1):
-        # output_mle: [b, d_vocab, l_a-1]
+        # output_mle: [b, d_vocab, l_]
         # output_ot: [b, l_a-1, d_hid]
-        # a_ids: [b, l_a-1]
-        # a_masks: [b, l_a-1]
+        # a_ids: [b, l_a]
+        # a_masks: [b, l_a]
 
         # Calculate MLE loss
-        loss_mle = self.criterion(output_mle, a_ids)
+        loss_mle = self.criterion(output_mle, a_ids[:, 1:])
 
-        # Calculate OT loss
-        ans = self.embd_layer.encode_ans(input_ids=a_ids, input_masks=a_masks)
-        # [b, l_a-1, d_hid]
+        # NOTE: OT loss is temporarily commented
+        # # Calculate OT loss
+        # a = self.embd_layer.encode_ans(a_ids=a_ids, a_masks=a_masks, ot_loss=True)[:, 1:]
+        # # [b, l_a-1, d_hid]
 
-        loss_ot = ipot(output_ot, ans, max_iter=200)
+        # loss_ot = ipot(output_ot, a, max_iter=400)
 
-        total_loss = loss_mle + gamma * loss_ot
+        # total_loss = loss_mle + gamma * loss_ot
+        total_loss = loss_mle
 
         return total_loss
 
@@ -191,19 +194,21 @@ class NarrativeModel(plt.LightningModule):
         # Do reasoning
         ####################
         Y = self.reasoning(q=q, c=c)
-        # [b, 1, d_hid]
+        # [b, n_c*l_c, d_hid]
 
         ####################
         # Generate answer
         ####################
 
         return (
-            self.ans_infer.do_predict(Y=Y, a_masks=a1_masks)
+            self.ans_infer.do_predict(Y=Y, c_ids=c_ids.view(c_ids.size(0), -1), q=q)
             if is_predict
             else self.ans_infer.do_train(
                 Y=Y,
                 a_ids=a1_ids,
                 a_masks=a1_masks,
+                c_ids=c_ids.view(c_ids.size(0), -1),
+                q=q,
                 cur_step=cur_step,
                 max_step=max_step,
             )
@@ -211,18 +216,17 @@ class NarrativeModel(plt.LightningModule):
         # pred: [b, d_vocab, l_a - 1]
 
     def training_step(self, batch: Any, batch_idx: int):
-        output_mle, output_ot = self(
+        output_mle = self(
             **batch,
             cur_step=batch_idx,
             max_step=self.size_dataset_train // self.batch_size,
         )
-        # output_ot: [b, l_a - 1, d_hid]
-        # output_mle: [b, d_vocab, l_a - 1]
+        # output_mle: [b, d_vocab, l_]
 
         a1_ids = batch["a1_ids"]
         a2_ids = batch["a2_ids"]
         a1_masks = batch["a1_masks"]
-        loss = self.get_loss(output_mle, output_ot, a1_ids[:, 1:], a1_masks[:, 1:])
+        loss = self.get_loss(output_mle, None, a1_ids, a1_masks)
 
         self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=False)
 
@@ -254,14 +258,13 @@ class NarrativeModel(plt.LightningModule):
         return 0
 
     def validation_step(self, batch: Any, batch_idx):
-        output_mle, output_ot = self(**batch, is_predict=True)
+        output_mle = self(**batch, is_predict=True)
         # output_ot: [b, l_a - 1, d_hid]
-        # output_mle: [b, d_vocab, l_a - 1]
 
         a1_ids = batch["a1_ids"]
         a2_ids = batch["a2_ids"]
         a1_masks = batch["a1_masks"]
-        loss = self.get_loss(output_mle, output_ot, a1_ids[:, 1:], a1_masks[:, 1:])
+        loss = self.get_loss(output_mle, None, a1_ids, a1_masks)
 
         self.log("valid/loss", loss, on_step=False, on_epoch=True, prog_bar=False)
 
