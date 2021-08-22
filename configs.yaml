@@ -115,7 +115,6 @@ logger:
   tensorboard:
     _target_: pytorch_lightning.loggers.tensorboard.TensorBoardLogger
     save_dir: tensorboard/
-    name: default
     name: ${now:%A %b-%d %H:%M}
     log_graph: False
     default_hp_metric: False

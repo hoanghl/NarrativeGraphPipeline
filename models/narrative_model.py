@@ -56,7 +56,7 @@ class NarrativeModel(plt.LightningModule):
         self.path_valid_pred = path_valid_pred
         self.bert_tokenizer = BertTokenizer.from_pretrained(path_pretrained)
 
-        os.makedirs(path_valid_pred, exist_ok=True)
+        os.makedirs(os.path.dirname(path_valid_pred), exist_ok=True)
 
         #############################
         # Define model
@@ -222,7 +222,7 @@ class NarrativeModel(plt.LightningModule):
         a1_ids = batch["a1_ids"]
         a2_ids = batch["a2_ids"]
         a1_masks = batch["a1_masks"]
-        loss = self.get_loss(output_mle, output_ot, a1_ids, a1_masks)
+        loss = self.get_loss(output_mle, output_ot, a1_ids[:, 1:], a1_masks[:, 1:])
 
         self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=False)
 
@@ -261,12 +261,14 @@ class NarrativeModel(plt.LightningModule):
         a1_ids = batch["a1_ids"]
         a2_ids = batch["a2_ids"]
         a1_masks = batch["a1_masks"]
-        loss = self.get_loss(output_mle, output_ot, a1_ids, a1_masks)
+        loss = self.get_loss(output_mle, output_ot, a1_ids[:, 1:], a1_masks[:, 1:])
+
+        self.log("valid/loss", loss, on_step=False, on_epoch=True, prog_bar=False)
 
         return {
             "loss": loss,
             "pred": (
-                output_mle.cpu().detach(),
+                torch.argmax(output_mle, dim=1).cpu().detach(),
                 a1_ids.cpu().detach(),
                 a2_ids.cpu().detach(),
             ),
