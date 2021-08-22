@@ -7,7 +7,7 @@ import torch.nn as torch_nn
 from transformers import AdamW, BertTokenizer, get_linear_schedule_with_warmup
 
 from datamodules.narrative_datamodule import NarrativeDataModule
-from models.layers.ans_infer_layer import BertDecoder
+from models.layers.ans_infer_layer import Decoder
 from models.layers.finegrain_layer import FineGrain
 from models.layers.graph_layer import GraphBasedReasoningLayer
 from utils.model_utils import get_scores, ipot
@@ -71,10 +71,12 @@ class NarrativeModel(plt.LightningModule):
             n_edges=n_edges,
             dropout=dropout,
         )
-        self.ans_infer = BertDecoder(
+        self.ans_infer = Decoder(
             l_a=l_a,
             d_bert=d_bert,
             d_vocab=d_vocab,
+            d_hid=d_hid,
+            dropout=dropout,
             tokenizer=self.bert_tokenizer,
             embd_layer=self.embd_layer,
         )
@@ -135,7 +137,7 @@ class NarrativeModel(plt.LightningModule):
         return prediction
 
     def get_loss(self, output_mle, output_ot, a_ids, a_masks, gamma=0.1):
-        # output_mle: [b, d_vocab, l_a-1]
+        # output_mle: [b, d_vocab, l_]
         # output_ot: [b, l_a-1, d_hid]
         # a_ids: [b, l_a]
         # a_masks: [b, l_a]
@@ -143,13 +145,15 @@ class NarrativeModel(plt.LightningModule):
         # Calculate MLE loss
         loss_mle = self.criterion(output_mle, a_ids[:, 1:])
 
-        # Calculate OT loss
-        a = self.embd_layer.encode_ans(a_ids=a_ids, a_masks=a_masks, ot_loss=True)[:, 1:]
-        # [b, l_a-1, d_hid]
+        # NOTE: OT loss is temporarily commented
+        # # Calculate OT loss
+        # a = self.embd_layer.encode_ans(a_ids=a_ids, a_masks=a_masks, ot_loss=True)[:, 1:]
+        # # [b, l_a-1, d_hid]
 
-        loss_ot = ipot(output_ot, a, max_iter=400)
+        # loss_ot = ipot(output_ot, a, max_iter=400)
 
-        total_loss = loss_mle + gamma * loss_ot
+        # total_loss = loss_mle + gamma * loss_ot
+        total_loss = loss_mle
 
         return total_loss
 
@@ -199,26 +203,27 @@ class NarrativeModel(plt.LightningModule):
                 Y=Y,
                 a_ids=a1_ids,
                 a_masks=a1_masks,
+                q=q,
+                c_ids=c_ids.view(c_ids.size(0), -1),
                 cur_step=cur_step,
                 max_step=max_step,
             )
             if not is_predict
-            else self.ans_infer.do_predict(Y=Y)
+            else self.ans_infer.do_predict(Y=Y, q=q, c_ids=c_ids.view(c_ids.size(0), -1))
         )
 
     def training_step(self, batch: Any, batch_idx: int):
-        output_mle, output_ot = self(
+        output_mle = self(
             **batch,
             cur_step=batch_idx,
             max_step=self.size_dataset_train // self.batch_size,
         )
-        # output_ot: [b, l_a - 1, d_hid]
-        # output_mle: [b, d_vocab, l_a - 1]
+        # output_mle: [b, d_vocab, l_]
 
         a1_ids = batch["a1_ids"]
         a2_ids = batch["a2_ids"]
         a1_masks = batch["a1_masks"]
-        loss = self.get_loss(output_mle, output_ot, a1_ids, a1_masks)
+        loss = self.get_loss(output_mle, None, a1_ids, a1_masks)
 
         self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=False)
 
@@ -285,14 +290,13 @@ class NarrativeModel(plt.LightningModule):
     # FOR PREDICTION PURPOSE
     #########################################
     def validation_step(self, batch: Any, batch_idx: int):
-        output_mle, output_ot = self(**batch, is_predict=True)
+        output_mle = self(**batch, is_predict=True)
         # output_ot: [b, l_a - 1, d_hid]
-        # output_mle: [b, d_vocab, l_a - 1]
 
         a1_ids = batch["a1_ids"]
         a2_ids = batch["a2_ids"]
         a1_masks = batch["a1_masks"]
-        loss = self.get_loss(output_mle, output_ot, a1_ids, a1_masks)
+        loss = self.get_loss(output_mle, None, a1_ids, a1_masks)
 
         self.log("valid/loss", loss, on_step=False, on_epoch=True, prog_bar=False)
 

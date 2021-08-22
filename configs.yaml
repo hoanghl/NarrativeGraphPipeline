@@ -69,7 +69,7 @@ model:
   n_nodes: 45
   n_edges: 200
   n_gru_layers: 5
-  d_hid: 64
+  d_hid: 256
   d_bert: 768
   d_vocab: 30522
   d_graph: 1024

@@ -1,5 +1,10 @@
 ### This file contains changes and modifications during developing.
 
+## Aug 22, 18:01
+
+- Replace **BertBasedDecoder** by **LSTM with PointerGenerator, no Sched Sampling**
+- Increase _d_hid_ from **64** to **256**
+
 ## Aug 21, 23:01
 
 - Remove some redundant _GRU_ layers in module _FineGrain_
