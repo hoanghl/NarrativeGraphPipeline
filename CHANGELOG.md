@@ -1,5 +1,9 @@
 ### This file contains changes and modifications during developing.
 
+## Aug 23, 10:29
+
+- Add **Scheduled Sampling** and **Optimal Transport IPOT** back
+
 ## Aug 22, 18:01
 
 - Replace **BertBasedDecoder** by **LSTM with PointerGenerator, no Sched Sampling**

@@ -159,17 +159,23 @@ class Decoder(torch_nn.Module):
 
             outputs.append(output.unsqueeze(-1))
 
-            ## NOTE: Later, this Teacher Forcing is replaced by Scheduled Sampling
-            # input_embd = self.choose_scheduled_sampling(
-            #     output, a[:, t].unsqueeze(1), cur_step, max_step
-            # )
-            input_embd = a[:, t].unsqueeze(1)
+            input_embd = self.choose_scheduled_sampling(
+                output, a[:, t].unsqueeze(1), cur_step, max_step
+            )
+            # input_embd = a[:, t].unsqueeze(1)
             # [b, 1, d_hid]
 
         outputs = torch.cat(outputs, dim=-1)
-        # [b, d_vocab, l_a]
+        # [b, d_vocab, l_a - 1]
 
-        return outputs
+        ## Get output for OT
+        output_ot = self.embd_layer.get_output_ot(torch.softmax(outputs.transpose(1, 2), dim=-1))
+        # [b, l_a - 1, d_hid]
+
+        output_mle = outputs
+        # [b, d_vocab, l_a - 1]
+
+        return output_mle, output_ot
 
     def get_tok_embd(self, tok):
         # tok: [b, 1]
@@ -212,6 +218,13 @@ class Decoder(torch_nn.Module):
             # [b, 1]
 
         outputs = torch.cat(outputs, dim=-1)
-        # [b, d_vocab, l_a]
+        # [b, d_vocab, l_a - 1]
 
-        return outputs
+        ## Get output for OT
+        output_ot = self.embd_layer.get_output_ot(torch.softmax(outputs.transpose(1, 2), dim=-1))
+        # [b, l_a - 1, d_hid]
+
+        output_mle = outputs
+        # [b, d_vocab, l_a - 1]
+
+        return output_mle, output_ot

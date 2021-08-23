@@ -139,21 +139,19 @@ class NarrativeModel(plt.LightningModule):
     def get_loss(self, output_mle, output_ot, a_ids, a_masks, gamma=0.1):
         # output_mle: [b, d_vocab, l_]
         # output_ot: [b, l_a-1, d_hid]
-        # a_ids: [b, l_a]
-        # a_masks: [b, l_a]
+        # a_ids: [b, l_a - 1]
+        # a_masks: [b, l_a - 1]
 
         # Calculate MLE loss
-        loss_mle = self.criterion(output_mle, a_ids[:, 1:])
+        loss_mle = self.criterion(output_mle, a_ids)
 
-        # NOTE: OT loss is temporarily commented
-        # # Calculate OT loss
-        # a = self.embd_layer.encode_ans(a_ids=a_ids, a_masks=a_masks, ot_loss=True)[:, 1:]
-        # # [b, l_a-1, d_hid]
+        # Calculate OT loss
+        a = self.embd_layer.encode_ans(a_ids=a_ids, a_masks=a_masks, ot_loss=True)
+        # [b, l_a-1, d_hid]
 
-        # loss_ot = ipot(output_ot, a, max_iter=400)
+        loss_ot = ipot(output_ot, a, max_iter=400)
 
-        # total_loss = loss_mle + gamma * loss_ot
-        total_loss = loss_mle
+        total_loss = loss_mle + gamma * loss_ot
 
         return total_loss
 
@@ -213,17 +211,18 @@ class NarrativeModel(plt.LightningModule):
         )
 
     def training_step(self, batch: Any, batch_idx: int):
-        output_mle = self(
+        output_mle, output_ot = self(
             **batch,
             cur_step=batch_idx,
             max_step=self.size_dataset_train // self.batch_size,
         )
-        # output_mle: [b, d_vocab, l_]
+        # output_ot: [b, l_a - 1, d_hid]
+        # output_mle: [b, d_vocab, l_a - 1]
 
         a1_ids = batch["a1_ids"]
         a2_ids = batch["a2_ids"]
         a1_masks = batch["a1_masks"]
-        loss = self.get_loss(output_mle, None, a1_ids, a1_masks)
+        loss = self.get_loss(output_mle, output_ot, a1_ids[:, 1:], a1_masks[:, 1:])
 
         self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=False)
 
@@ -290,13 +289,14 @@ class NarrativeModel(plt.LightningModule):
     # FOR PREDICTION PURPOSE
     #########################################
     def validation_step(self, batch: Any, batch_idx: int):
-        output_mle = self(**batch, is_predict=True)
+        output_mle, output_ot = self(**batch, is_predict=True)
         # output_ot: [b, l_a - 1, d_hid]
+        # output_mle: [b, d_vocab, l_a - 1]
 
         a1_ids = batch["a1_ids"]
         a2_ids = batch["a2_ids"]
         a1_masks = batch["a1_masks"]
-        loss = self.get_loss(output_mle, None, a1_ids, a1_masks)
+        loss = self.get_loss(output_mle, output_ot, a1_ids[:, 1:], a1_masks[:, 1:])
 
         self.log("valid/loss", loss, on_step=False, on_epoch=True, prog_bar=False)
 

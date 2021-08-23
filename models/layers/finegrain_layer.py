@@ -34,7 +34,7 @@ class FineGrain(torch_nn.Module):
         self.lin1 = torch_nn.Sequential(
             torch_nn.Linear(d_bert, d_bert),
             torch_nn.Tanh(),
-            torch_nn.BatchNorm1d(l_a),
+            torch_nn.BatchNorm1d(l_a - 1),
             torch_nn.Linear(d_bert, d_hid // 2),
         )
 
