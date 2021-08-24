@@ -18,8 +18,16 @@ class BertBasedEmbedding(torch_nn.Module):
         self.bert_emb = BertModel.from_pretrained(path_pretrained)
         self.lin1 = torch_nn.Linear(d_bert, d_hid, bias=False)
 
-    def forward(self):
-        return
+    def remove_special_toks(self, a, a_masks):
+        bz = a.size(0)
+
+        a_ = torch.zeros_like(a)
+
+        for i in range(bz):
+            l = a_masks[i].sum() - 2
+            a_[i, :l] = a[i, 1 : 1 + l]
+
+        return a_
 
     def encode_ques_para(self, q_ids, c_ids, q_masks, c_masks):
         # q: [b, l_q]
@@ -34,6 +42,7 @@ class BertBasedEmbedding(torch_nn.Module):
         #########################
         q = self.bert_emb(input_ids=q_ids, attention_mask=q_masks)[0]
         # [b, l_q, d_bert]
+        q = self.remove_special_toks(q, q_masks)
 
         #########################
         # Contextual embedding for c with BERT
@@ -41,11 +50,11 @@ class BertBasedEmbedding(torch_nn.Module):
         # Convert to another shape to fit with
         # input shape of self.embedding
         c = c_ids.view((-1, l_c))
+        # [b*n_c, l_c, d_bert]
         c_masks = c_masks.view((-1, l_c))
-        # c     : [b*n_c, l_c, d_bert]
-        # c_masks: [b*n_c, l_c]
-
+        # [b*n_c, l_c]
         c = self.bert_emb(input_ids=c, attention_mask=c_masks)[0]
+        c = self.remove_special_toks(c, c_masks)
         # [b*n_c, l_c, d_bert]
         c = c.view((b, -1, l_c, self.d_bert))
         # [b, n_c, l_c, d_bert]
