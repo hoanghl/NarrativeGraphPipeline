@@ -142,6 +142,4 @@ tests/
 .vscode
 cmd_for_tessera.sh
 .vector_cache
-data*
 *.ipynb
-!datamodules
