@@ -1,7 +1,9 @@
 import torch
 import torch.nn as torch_nn
-from transformers import BertModel, BertTokenizer
+from transformers import BertModel, BertTokenizer, logging
 from utils.model_utils import TransEncoder
+
+logging.set_verbosity_error()
 
 
 class CHIME(torch_nn.Module):
@@ -82,15 +84,15 @@ class CHIME(torch_nn.Module):
             l = 1 + lq_ + 1 + lc_ + 1 + la_ + 1
             qca_ids[i, :l] = torch.cat(
                 [
-                    torch.LongTensor([self.cls_id], device=device),
+                    torch.tensor([self.cls_id], device=device, dtype=torch.long),
                     q_np,
                     # NOTE: If not work, use the next of following instead of the following
-                    torch.LongTensor([self.sep_id], device=device),
-                    # torch.LongTensor([self.cls_id], device=device),
+                    torch.tensor([self.sep_id], device=device, dtype=torch.long),
+                    # torch.tensor([self.cls_id], device=device, dtype=torch.long),
                     c_np,
-                    torch.LongTensor([self.sep_id], device=device),
+                    torch.tensor([self.sep_id], device=device, dtype=torch.long),
                     a_np,
-                    torch.LongTensor([self.sep_id], device=device),
+                    torch.tensor([self.sep_id], device=device, dtype=torch.long),
                 ],
                 dim=-1,
             )
@@ -128,7 +130,6 @@ class CHIME(torch_nn.Module):
         for output, lq_, lc_, la_ in zip(outputs, lq_np, lc_np, la_np):
             l_pad_q = self.lq - lq_
             l_pad_c = self.lc - lc_
-            l_pad_a = self.la - la_
 
             l1 = 1 + lq_ + 1
             l2 = 1 + lq_ + 1 + lc_ + 1 + la_ + 1

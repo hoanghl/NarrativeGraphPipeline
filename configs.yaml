@@ -118,7 +118,7 @@ logger:
     prefix: ""
   wandb:
     _target_: pytorch_lightning.loggers.wandb.WandbLogger
-    project: "narrative_graph"
+    project: "narrative_analyst"
     name: ${now:%A %b-%d %H:%M}
     save_dir: "."
     offline: False # set True to store all logs only locally
