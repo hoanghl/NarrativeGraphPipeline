@@ -2,6 +2,10 @@
 
 ### This file contains changes and modifications during developing.
 
+## Aug 24, 16:26
+
+- Reimplement model **CHIME**
+
 ## July 10 2021, 16:57
 
 - Use data v4.2

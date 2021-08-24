@@ -7,12 +7,12 @@ import torch
 class GeneratorHugging(GenerationMixin):
     def __init__(
         self,
-        batch_size: int = 2,
-        min_length: int = 5,
-        max_length: int = 20,
-        num_beams: int = 10,
-        temperature: int = 1,
-        no_repeat_ngram_size: int = 5,
+        batch_size,
+        min_length,
+        max_length,
+        num_beams,
+        temperature,
+        no_repeat_ngram_size,
         model: Any = None,
         pad_token_id: Optional[int] = 0,
         bos_token_id: Optional[int] = 1,
@@ -53,7 +53,7 @@ class GeneratorHugging(GenerationMixin):
 
         # instantiate logits processors
         self.logits_warper = self._get_logits_warper(
-            top_k=50, top_p=1, temperature=temperature, num_beams=num_beams
+            top_k, top_p, temperature=temperature, num_beams=num_beams
         )
 
     def prepare_inputs_for_generation(
@@ -102,22 +102,14 @@ class GeneratorHugging(GenerationMixin):
 
         # init attention / hidden states / scores tuples
         scores = () if (return_dict_in_generate and output_scores) else None
-        decoder_attentions = (
-            () if (return_dict_in_generate and output_attentions) else None
-        )
-        cross_attentions = (
-            () if (return_dict_in_generate and output_attentions) else None
-        )
-        decoder_hidden_states = (
-            () if (return_dict_in_generate and output_hidden_states) else None
-        )
+        decoder_attentions = () if (return_dict_in_generate and output_attentions) else None
+        cross_attentions = () if (return_dict_in_generate and output_attentions) else None
+        decoder_hidden_states = () if (return_dict_in_generate and output_hidden_states) else None
 
         # if model is an encoder-decoder, retrieve encoder attention weights and hidden states
         if return_dict_in_generate and is_encoder_decoder:
             encoder_attentions = (
-                model_kwargs["encoder_outputs"].get("attentions")
-                if output_attentions
-                else None
+                model_kwargs["encoder_outputs"].get("attentions") if output_attentions else None
             )
             encoder_hidden_states = (
                 model_kwargs["encoder_outputs"].get("hidden_states")
@@ -131,8 +123,7 @@ class GeneratorHugging(GenerationMixin):
         if input_ids is None:
             # init `input_ids` with bos_token_id
             input_ids = (
-                torch.ones((batch_size * num_beams, 1), dtype=torch.long)
-                * self.bos_token_id
+                torch.ones((batch_size * num_beams, 1), dtype=torch.long) * self.bos_token_id
             )
 
         batch_beam_size, cur_len = input_ids.shape
@@ -183,18 +174,14 @@ class GeneratorHugging(GenerationMixin):
 
             # reshape for beam search
             vocab_size = next_token_scores.shape[-1]
-            next_token_scores = next_token_scores.view(
-                batch_size, num_beams * vocab_size
-            )
+            next_token_scores = next_token_scores.view(batch_size, num_beams * vocab_size)
 
             probs = F.softmax(next_token_scores, dim=-1)
 
-            next_tokens = torch.multinomial(probs, num_samples=2 * num_beams)
+            next_tokens = torch.multinomial(probs, num_samples * num_beams)
             next_token_scores = torch.gather(next_token_scores, -1, next_tokens)
 
-            next_token_scores, _indices = torch.sort(
-                next_token_scores, descending=True, dim=1
-            )
+            next_token_scores, _indices = torch.sort(next_token_scores, descending=True, dim)
             next_tokens = torch.gather(next_tokens, -1, _indices)
 
             next_indices = next_tokens // vocab_size
@@ -213,9 +200,7 @@ class GeneratorHugging(GenerationMixin):
             beam_next_tokens = beam_outputs["next_beam_tokens"]
             beam_idx = beam_outputs["next_beam_indices"]
 
-            input_ids = torch.cat(
-                [input_ids[beam_idx, :], beam_next_tokens.unsqueeze(-1)], dim=-1
-            )
+            input_ids = torch.cat([input_ids[beam_idx, :], beam_next_tokens.unsqueeze(-1)], dim=-1)
             cur_len = cur_len + 1
 
             model_kwargs = self._update_model_kwargs_for_generation(
@@ -307,15 +292,15 @@ class GeneratorOwn:
 
     def __init__(
         self,
-        beam_size: int = 10,
-        max_len: int = 12,
+        beam_size,
+        max_len,
         model=None,
-        init_tok: int = 101,
-        stop_tok: int = 102,
-        no_repeat_ngram_size: int = 5,
+        init_tok,
+        stop_tok,
+        no_repeat_ngram_size,
         early_stop: bool = False,
         topk_strategy: str = "topk",
-        threshold=0.65,
+        threshold.65,
     ):
 
         self.max_len = max_len
@@ -333,7 +318,7 @@ class GeneratorOwn:
         else:
             self.beam_size = beam_size
 
-    def search(self, Y: torch.Tensor):
+    def search(self, Y):
         """Start Beam search given tensor X which is result from previous model
 
         Args:
@@ -390,18 +375,16 @@ class GeneratorOwn:
                 # Calculate log_softmax and topk
                 #################################
                 if self.topk_strategy == "topk":
-                    distribution = torch.log_softmax(output, dim=0)
+                    distribution = torch.log_softmax(output, dim)
                     topk_dist, topk_tok = self.select_topk(distribution)
                 elif self.topk_strategy == "select_nucleus_sample":
-                    distribution = torch.softmax(output, dim=0)
+                    distribution = torch.softmax(output, dim)
                     topk_dist, topk_tok = self.select_nucleus_sample(distribution)
                 elif self.topk_strategy == "select_nucleus_sample_nobeam":
-                    distribution = torch.softmax(output, dim=0)
-                    topk_dist, topk_tok = self.select_nucleus_sample_nobeam(
-                        distribution
-                    )
+                    distribution = torch.softmax(output, dim)
+                    topk_dist, topk_tok = self.select_nucleus_sample_nobeam(distribution)
                 elif self.topk_strategy == "select_mix_beam":
-                    distribution = torch.softmax(output, dim=0)
+                    distribution = torch.softmax(output, dim)
                     topk_dist, topk_tok = self.select_mix_beam(distribution)
                 else:
                     raise TypeError
@@ -455,7 +438,7 @@ class GeneratorOwn:
         ##########################
         # Select topP using Nucleus sampling
         ##########################
-        sorted_val, indices = torch.sort(distribution, dim=0, descending=True)
+        sorted_val, indices = torch.sort(distribution, dim, descending=True)
 
         accum = 0
         for i, val in enumerate(sorted_val):
@@ -464,7 +447,7 @@ class GeneratorOwn:
             accum += val
 
         topP_tok = indices[: i + 1]
-        topP_dist = torch.index_select(distribution, dim=0, index=topP_tok) / accum
+        topP_dist = torch.index_select(distribution, dim, index=topP_tok) / accum
 
         ##########################
         # Randomly select topK
@@ -481,10 +464,8 @@ class GeneratorOwn:
                 accum += culmulative
             topK.append(tok)
 
-        topK_dist = [
-            distribution[i] / accum if i in topK else 0 for i in range(d_vocab)
-        ]
-        topK_dist = torch.log_softmax(torch.FloatTensor(topK_dist), dim=0)
+        topK_dist = [distribution[i] / accum if i in topK else 0 for i in range(d_vocab)]
+        topK_dist = torch.log_softmax(torch.FloatTensor(topK_dist), dim)
 
         ##########################
         # Select beam_size element from topK
@@ -498,7 +479,7 @@ class GeneratorOwn:
         ##########################
         # Select topP using Nucleus sampling
         ##########################
-        sorted_val, indices = torch.sort(distribution, dim=0, descending=True)
+        sorted_val, indices = torch.sort(distribution, dim, descending=True)
 
         accum = 0
         for i, val in enumerate(sorted_val):
@@ -507,7 +488,7 @@ class GeneratorOwn:
             accum += val
 
         topP_tok = indices[: i + 1]
-        topP_dist = torch.index_select(distribution, dim=0, index=topP_tok) / accum
+        topP_dist = torch.index_select(distribution, dim, index=topP_tok) / accum
 
         ##########################
         # Randomly select topK
@@ -529,11 +510,11 @@ class GeneratorOwn:
 
         top_dist, top_tok = torch.topk(distribution, 10000, 0)
 
-        top_dist = top_dist / top_dist.sum(dim=0) / temperature
+        top_dist = top_dist / top_dist.sum(dim) / temperature
 
         topBeam_dist, topBeam_tok = torch.topk(top_dist, self.beam_size, 0)
         topBeam_tok = top_tok[topBeam_tok]
-        topBeam_dist = torch.log_softmax(topBeam_dist, dim=0)
+        topBeam_dist = torch.log_softmax(topBeam_dist, dim)
 
         # indx = torch.randint(0, 1000, (1,))
         # topBeam_dist = torch.log(top_dist[indx])

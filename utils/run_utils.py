@@ -1,25 +1,25 @@
-import logging as log_std
+import logging
+import multiprocessing
 import warnings
 from typing import List, Sequence
-
 
 import pytorch_lightning as pl
 import rich.syntax
 import rich.tree
 import wandb
-from tqdm import tqdm
 from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning.loggers.wandb import WandbLogger
 from pytorch_lightning.utilities import rank_zero_only
+from tqdm import tqdm
 
 
-def get_logger(name=__name__, level=log_std.INFO) -> log_std.Logger:
+def get_logger(name=__name__, level=logging.INFO) -> logging.Logger:
     """Initializes multi-GPU-friendly python logger."""
 
-    logger = log_std.getLogger(name)
+    logger = logging.getLogger(name)
     logger.setLevel(level)
 
-    # this ensures all log_std levels get marked with the rank zero decorator
+    # this ensures all logging levels get marked with the rank zero decorator
     # otherwise logs would get multiplied for each GPU process in multi-GPU setup
     for level in (
         "debug",
@@ -65,9 +65,7 @@ def extras(config: DictConfig) -> None:
 
     # force debugger friendly configuration if <config.trainer.fast_dev_run=True>
     if config.trainer.get("fast_dev_run"):
-        log.info(
-            "Forcing debugger friendly configuration! <config.trainer.fast_dev_run=True>"
-        )
+        log.info("Forcing debugger friendly configuration! <config.trainer.fast_dev_run=True>")
         # Debuggers don't like GPUs or multiprocessing
         if config.trainer.get("gpus"):
             config.trainer.gpus = 0
@@ -79,9 +77,7 @@ def extras(config: DictConfig) -> None:
     # force multi-gpu friendly configuration if <config.trainer.accelerator=ddp>
     accelerator = config.trainer.get("accelerator")
     if accelerator in ["ddp", "ddp_spawn", "dp", "ddp2"]:
-        log.info(
-            f"Forcing ddp friendly configuration! <config.trainer.accelerator={accelerator}>"
-        )
+        log.info(f"Forcing ddp friendly configuration! <config.trainer.accelerator={accelerator}>")
         if config.datamodule.get("num_workers"):
             config.datamodule.num_workers = 0
         if config.datamodule.get("pin_memory"):
@@ -95,12 +91,13 @@ def extras(config: DictConfig) -> None:
 def print_config(
     config: DictConfig,
     fields: Sequence[str] = (
+        "mode",
+        "PATH",
         "trainer",
         "model",
         "datamodule",
         "callbacks",
         "logger",
-        "seed",
     ),
     resolve: bool = True,
 ) -> None:
@@ -169,8 +166,8 @@ def log_hyperparameters(
     # send hparams to all loggers
     trainer.logger.log_hyperparams(hparams)
 
-    # disable log_std any more hyperparameters for all loggers
-    # this is just a trick to prevent trainer from log_std hparams of model,
+    # disable logging any more hyperparameters for all loggers
+    # this is just a trick to prevent trainer from logging hparams of model,
     # since we already did that above
     trainer.logger.log_hyperparams = empty
 
@@ -189,173 +186,3 @@ def finish(
     for lg in logger:
         if isinstance(lg, WandbLogger):
             wandb.finish()
-
-
-######################################################################################
-# User-defined utils
-######################################################################################
-import multiprocessing
-import re
-
-import torch
-from rouge import Rouge
-from nltk.translate.meteor_score import meteor_score
-from nltk.translate.bleu_score import sentence_bleu
-import numpy as np
-
-
-class ParallelHelper:
-    def __init__(
-        self,
-        f_task: object,
-        data: list,
-        data_allocation: object,
-        num_workers: int = 4,
-        desc=None,
-        show_bar=False,
-    ):
-        self.n_data = len(data)
-        self.show_bar = show_bar
-
-        self.queue = multiprocessing.Queue()
-        if self.show_bar:
-            self.pbar = tqdm(total=self.n_data, desc=desc)
-
-        self.jobs = list()
-        for ith in range(num_workers):
-            lo_bound = ith * self.n_data // num_workers
-            hi_bound = (
-                (ith + 1) * self.n_data // num_workers
-                if ith < (num_workers - 1)
-                else self.n_data
-            )
-
-            p = multiprocessing.Process(
-                target=f_task,
-                args=(data_allocation(data, lo_bound, hi_bound), self.queue),
-            )
-            self.jobs.append(p)
-
-    def launch(self) -> list:
-        """
-        Launch parallel process
-        Returns: a list after running parallel task
-
-        """
-        dataset = []
-
-        for job in self.jobs:
-            job.start()
-
-        cnt = 0
-        while cnt < self.n_data:
-            while not self.queue.empty():
-                dataset.append(self.queue.get())
-                cnt += 1
-
-                if self.show_bar:
-                    self.pbar.update()
-
-        if self.show_bar:
-            self.pbar.close()
-
-        for job in self.jobs:
-            job.terminate()
-
-        for job in self.jobs:
-            job.join()
-
-        return dataset
-
-
-def ipot(a1: torch.Tensor, a2: torch.Tensor, beta=2, max_iter=1000, L=1):
-    """Calculate loss based on OT."""
-
-    b, len_ans, d_hid = a1.size()
-    n = b * len_ans
-
-    # a1: [b, len_ans, d_hid]
-    # a2: [b, len_ans, d_hid]
-
-    a1, a2 = a1.view(-1, d_hid), a2.view(-1, d_hid)
-    # [n, d_hid]
-
-    # Calculate matrix C
-    a1_norm = a1 / a1.norm(dim=1)[:, None]
-    a2_norm = a2 / a2.norm(dim=1)[:, None]
-    C = a1_norm @ a2_norm.transpose(0, 1)
-    # [n, n]
-
-    sigma = torch.ones((n, 1), device=a1.device) / n
-
-    T = torch.ones((n, n), device=a1.device) / n ** 2
-    # [n, n]
-    A = torch.exp(-(C / beta))
-    # [n, n]
-
-    for _ in range(max_iter):
-        Q = A * T
-        # [n, n]
-
-        for _ in range(L):
-            d = 1 / n / (Q @ sigma)
-            sigma = 1 / n / (Q.T @ d)
-
-        d1 = torch.diag(d.squeeze(1))
-        d2 = torch.diag(sigma.squeeze(1))
-        T = d1 * Q * d2
-
-    loss = torch.sum(T * C)
-
-    return loss
-
-
-def process_sent(sent: str):
-    return re.sub(r"(\[PAD\]|\[CLS\]|\[SEP\]|\[UNK\]|\[MASK\])", "", sent).strip()
-
-
-def get_scores(ref: list, pred: str, eps=10e-8):
-    """Calculate metrics BLEU-1, BLEU4, METEOR and ROUGE_L.
-
-    ref = [
-        "the transcript is a written version of each day",
-        "version of each day"
-    ]
-    pred= "a written version of"
-
-    Args:
-        ref (list): list of reference strings
-        pred (str): string generated by model
-
-    Returns:
-        tuple: tuple of 4 scores
-    """
-
-    pred = process_sent(pred)
-    ref = list(map(process_sent, ref))
-
-    if pred == "":
-        return 0, 0, 0, 0
-
-    # Calculate BLEU score
-    ref_ = [x.split() for x in ref]
-    pred_ = pred.split()
-
-    bleu_1 = sentence_bleu(ref_, pred_, weights=(1, 0, 0, 0))
-    bleu_4 = sentence_bleu(ref_, pred_, weights=(0.25, 0.25, 0.25, 0.25))
-
-    # Calculate METEOR
-    meteor = meteor_score(ref, pred)
-
-    # Calculate ROUGE-L
-    scores = np.array(
-        [Rouge().get_scores(ref_, pred, avg=True)["rouge-l"]["f"] for ref_ in ref]
-    )
-    rouge_l = np.mean(scores)
-
-    return (
-        bleu_1 if bleu_1 > eps else 0,
-        bleu_4 if bleu_4 > eps else 0,
-        meteor if meteor > eps else 0,
-        rouge_l if rouge_l > eps else 0,
-    )
