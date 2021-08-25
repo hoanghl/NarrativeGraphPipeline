@@ -6,7 +6,6 @@ import torch
 import torch.nn as torch_nn
 from transformers import AdamW, BertTokenizer, get_linear_schedule_with_warmup
 
-from datamodules.narrative_datamodule import NarrativeDataModule
 from models.layers.ans_infer_layer import Decoder
 from models.layers.finegrain_layer import FineGrain
 from models.layers.graph_layer import GraphBasedReasoningLayer
@@ -17,7 +16,7 @@ class NarrativeModel(plt.LightningModule):
     def __init__(
         self,
         batch_size,
-        l_a,
+        la,
         n_nodes,
         n_edges,
         n_gru_layers,
@@ -56,71 +55,42 @@ class NarrativeModel(plt.LightningModule):
         # Define model
         #############################
         self.embd_layer = FineGrain(
-            l_a=l_a,
+            la=la,
             n_gru_layers=n_gru_layers,
             d_bert=d_bert,
             d_hid=d_hid,
             path_pretrained=path_pretrained,
         )
-        self.reasoning = GraphBasedReasoningLayer(
-            batch_size=batch_size,
-            d_hid=d_hid,
-            d_bert=d_bert,
-            d_graph=d_graph,
-            n_nodes=n_nodes,
-            n_edges=n_edges,
-            dropout=dropout,
-        )
+        # self.reasoning = GraphBasedReasoningLayer(
+        #     batch_size=batch_size,
+        #     d_hid=d_hid,
+        #     d_bert=d_bert,
+        #     d_graph=d_graph,
+        #     n_nodes=n_nodes,
+        #     n_edges=n_edges,
+        #     dropout=dropout,
+        # )
         self.ans_infer = Decoder(
-            l_a=l_a,
+            la=la,
             d_bert=d_bert,
             d_vocab=d_vocab,
-            d_hid=d_hid,
-            dropout=dropout,
             tokenizer=self.bert_tokenizer,
             embd_layer=self.embd_layer,
+            criterion=torch_nn.CrossEntropyLoss(ignore_index=self.bert_tokenizer.pad_token_id),
         )
 
-        ## Freeeze some parameters
-        list_freeze_sets = [
-            # self.embd_layer.bert_emb.parameters(),
-            # self.ans_infer.decoder.parameters(),
-        ]
-        for params in list_freeze_sets:
-            for param in params:
-                param.requires_grad = False
-
-        #############################
-        # Define things
-        #############################
-        self.criterion = torch_nn.CrossEntropyLoss(ignore_index=self.bert_tokenizer.pad_token_id)
+        # ## Freeeze some parameters
+        # list_freeze_sets = [
+        #     # self.embd_layer.bert_emb.parameters(),
+        #     # self.ans_infer.decoder.parameters(),
+        # ]
+        # for params in list_freeze_sets:
+        #     for param in params:
+        #         param.requires_grad = False
 
     ####################################################################
     # FOR TRAINING PURPOSE
     ####################################################################
-
-    def get_score_from_outputs(self, outputs):
-        n_samples = 0
-        bleu_1, bleu_4, meteor, rouge_l = 0, 0, 0, 0
-        for pair in outputs:
-            try:
-                bleu_1_, bleu_4_, meteor_, rouge_l_ = get_scores(**pair)
-            except ValueError:
-                bleu_1_, bleu_4_, meteor_, rouge_l_ = 0, 0, 0, 0
-
-            bleu_1 += bleu_1_
-            bleu_4 += bleu_4_
-            meteor += meteor_
-            rouge_l += rouge_l_
-
-            n_samples += 1
-
-        return (
-            bleu_1 / n_samples,
-            bleu_4 / n_samples,
-            meteor / n_samples,
-            rouge_l / n_samples,
-        )
 
     def get_prediction(self, output, a1_ids, a2_ids):
         prediction = [
@@ -136,25 +106,6 @@ class NarrativeModel(plt.LightningModule):
 
         return prediction
 
-    def get_loss(self, output_mle, output_ot, a_ids, a_masks, gamma=0.1):
-        # output_mle: [b, d_vocab, l_]
-        # output_ot: [b, l_a-1, d_hid]
-        # a_ids: [b, l_a - 1]
-        # a_masks: [b, l_a - 1]
-
-        # Calculate MLE loss
-        loss_mle = self.criterion(output_mle, a_ids)
-
-        # Calculate OT loss
-        a = self.embd_layer.encode_ans(a_ids=a_ids, a_masks=a_masks, ot_loss=True)
-        # [b, l_a-1, d_hid]
-
-        loss_ot = ipot(output_ot, a, max_iter=400)
-
-        total_loss = loss_mle + gamma * loss_ot
-
-        return total_loss
-
     def forward(
         self,
         q_ids,
@@ -168,12 +119,12 @@ class NarrativeModel(plt.LightningModule):
         is_predict=False,
         **kwargs
     ):
-        # q_ids: [b, l_q]
-        # q_masks  : [b, l_q]
-        # c_ids: [b, n_c, l_c]
-        # c_masks : [b, n_c, l_c]
-        # a1_ids: [b, l_a]
-        # a1_masks   : [b, l_a]
+        # q_ids: [b, lq]
+        # q_masks  : [b, lq]
+        # c_ids: [b, nc, lc]
+        # c_masks : [b, nc, lc]
+        # a1_ids: [b, la]
+        # a1_masks   : [b, la]
 
         ####################
         # Embed question, c and answer
@@ -184,54 +135,46 @@ class NarrativeModel(plt.LightningModule):
             q_masks=q_masks,
             c_masks=c_masks,
         )
-        # q: [b, l_q, d_bert]
-        # c: [b, n_c, l_c, d_bert]
+        # q: [b, lq, d_bert]
+        # c: [b, nc, lc, d_bert]
 
         ####################
         # Do reasoning
         ####################
-        Y = self.reasoning(c)
-        # [b, n_c*l_c, d_bert]
+        # Y = self.reasoning(c)
+        # [b, nc*lc, d_bert]
 
         ####################
         # Generate answer
         ####################
         return (
             self.ans_infer.do_train(
-                Y=Y,
+                Y=c,
                 a_ids=a1_ids,
                 a_masks=a1_masks,
-                q=q,
-                c_ids=c_ids.view(c_ids.size(0), -1),
                 cur_step=cur_step,
                 max_step=max_step,
             )
             if not is_predict
-            else self.ans_infer.do_predict(Y=Y, q=q, c_ids=c_ids.view(c_ids.size(0), -1))
+            else self.ans_infer.do_predict(
+                Y=c,
+                a_ids=a1_ids,
+                a_masks=a1_masks,
+            )
         )
 
     def training_step(self, batch: Any, batch_idx: int):
-        output_mle, output_ot = self(
-            **batch,
-            cur_step=batch_idx,
-            max_step=self.size_dataset_train // self.batch_size,
-        )
-        # output_ot: [b, l_a - 1, d_hid]
-        # output_mle: [b, d_vocab, l_a - 1]
-
-        a1_ids = batch["a1_ids"]
-        a2_ids = batch["a2_ids"]
-        a1_masks = batch["a1_masks"]
-        loss = self.get_loss(output_mle, output_ot, a1_ids[:, 1:], a1_masks[:, 1:])
+        loss, logist = self(**batch, is_predict=True)
+        # logist: [b, la, d_vocab]
 
         self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=False)
 
         return {
             "loss": loss,
             "pred": (
-                torch.argmax(output_mle, dim=1).cpu().detach(),
-                a1_ids.cpu().detach(),
-                a2_ids.cpu().detach(),
+                torch.argmax(logist, dim=-1).cpu().detach(),
+                batch["a1_ids"].cpu().detach(),
+                batch["a2_ids"].cpu().detach(),
             ),
         }
 
@@ -243,7 +186,7 @@ class NarrativeModel(plt.LightningModule):
         with open(self.path_train_pred, "a+") as pred_file:
             json.dump(preds, pred_file, indent=2, ensure_ascii=False)
 
-        bleu_1, bleu_4, meteor, rouge_l = self.get_score_from_outputs(preds)
+        bleu_1, bleu_4, meteor, rouge_l = get_scores(preds)
 
         self.log("train/bleu_1", bleu_1, on_epoch=True, prog_bar=False)
         self.log("train/bleu_4", bleu_4, on_epoch=True, prog_bar=False)
@@ -253,7 +196,7 @@ class NarrativeModel(plt.LightningModule):
     def configure_optimizers(self):
         no_decay = ["bias", "LayerNorm.weight"]
         params_decay, params_nodecay = [], []
-        for model in [self.embd_layer, self.reasoning, self.ans_infer]:
+        for model in [self.embd_layer, self.ans_infer]:
             for n, p in model.named_parameters():
                 if not any(nd in n for nd in no_decay):
                     params_decay.append(p)
@@ -289,23 +232,17 @@ class NarrativeModel(plt.LightningModule):
     # FOR PREDICTION PURPOSE
     #########################################
     def validation_step(self, batch: Any, batch_idx: int):
-        output_mle, output_ot = self(**batch, is_predict=True)
-        # output_ot: [b, l_a - 1, d_hid]
-        # output_mle: [b, d_vocab, l_a - 1]
-
-        a1_ids = batch["a1_ids"]
-        a2_ids = batch["a2_ids"]
-        a1_masks = batch["a1_masks"]
-        loss = self.get_loss(output_mle, output_ot, a1_ids[:, 1:], a1_masks[:, 1:])
+        loss, logist = self(**batch, is_predict=True)
+        # logist: [b, la, d_vocab]
 
         self.log("valid/loss", loss, on_step=False, on_epoch=True, prog_bar=False)
 
         return {
             "loss": loss,
             "pred": (
-                torch.argmax(output_mle, dim=1).cpu().detach(),
-                a1_ids.cpu().detach(),
-                a2_ids.cpu().detach(),
+                torch.argmax(logist, dim=-1).cpu().detach(),
+                batch["a1_ids"].cpu().detach(),
+                batch["a2_ids"].cpu().detach(),
             ),
         }
 
@@ -317,52 +254,9 @@ class NarrativeModel(plt.LightningModule):
         with open(self.path_valid_pred, "a+") as pred_file:
             json.dump(preds, pred_file, indent=2, ensure_ascii=False)
 
-        bleu_1, bleu_4, meteor, rouge_l = self.get_score_from_outputs(preds)
+        bleu_1, bleu_4, meteor, rouge_l = get_scores(preds)
 
         self.log("valid/bleu_1", bleu_1, on_epoch=True, prog_bar=False)
         self.log("valid/bleu_4", bleu_4, on_epoch=True, prog_bar=False)
         self.log("valid/meteor", meteor, on_epoch=True, prog_bar=False)
         self.log("valid/rouge_l", rouge_l, on_epoch=True, prog_bar=False)
-
-    # def on_validation_end(self) -> None:
-    #     if self.current_epoch % self.switch_frequency == 0 and self.current_epoch != 0:
-    #         self.datamodule.switch_answerability()
-
-    def predict_step(
-        self,
-        batch: Any,
-        batch_idx: int,
-        dataloader_idx: Optional[int],
-    ) -> Any:
-        output_mle, _ = self(**batch, is_predict=True)
-        # output_ot: [b, l_a - 1, d_hid]
-        # output_mle: [b, d_vocab, l_a - 1]
-
-        a1_ids = batch["a1_ids"]
-        a2_ids = batch["a2_ids"]
-
-        return {
-            "pred": (
-                output_mle.cpu().detach(),
-                a1_ids.cpu().detach(),
-                a2_ids.cpu().detach(),
-            ),
-        }
-
-    def on_predict_batch_end(
-        self, outputs: Optional[Any], batch: Any, batch_idx: int, dataloader_idx: int
-    ) -> None:
-
-        preds = []
-        for p in [out["pred"] for out in outputs]:
-            preds.extend(self.get_prediction(p[0], p[1], p[2]))
-
-        with open(self.path_valid_pred, "a+") as pred_file:
-            json.dump(preds, pred_file, indent=2, ensure_ascii=False)
-
-        bleu_1, bleu_4, meteor, rouge_l = self.get_score_from_outputs(preds)
-
-        self.log("predict/bleu_1", bleu_1, on_epoch=True, prog_bar=False)
-        self.log("predict/bleu_4", bleu_4, on_epoch=True, prog_bar=False)
-        self.log("predict/meteor", meteor, on_epoch=True, prog_bar=False)
-        self.log("predict/rouge_l", rouge_l, on_epoch=True, prog_bar=False)

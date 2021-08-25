@@ -1,5 +1,13 @@
 ### This file contains changes and modifications during developing.
 
+## Aug 25, 23:51
+
+- Temporarily comment module **GraphReasoning**
+- Replace module _PGN_ by _TransDecoder_, use **Schedule Sampling for Transformer**
+- Move function _loss calculation_ into module **Decoder**
+- Refactor code in _metric calculation_
+- Fix MLE loss calculation method
+
 ## Aug 23, 10:29
 
 - Add **Scheduled Sampling** and **Optimal Transport IPOT** back

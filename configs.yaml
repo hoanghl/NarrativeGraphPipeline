@@ -36,10 +36,10 @@ batch_size: 5
 n_workers: 8
 n_shards: 4
 
-l_q: 35 # sequence length of query (question)
-l_c: 180 # sequence length of each para of context
-n_c: 10
-l_a: 12 # sequence length of answer
+lq: 35 # sequence length of query (question)
+lc: 180 # sequence length of each para of context
+nc: 10
+la: 12 # sequence length of answer
 sizes_dataset:
   train: 32747
   test: 10557
@@ -65,7 +65,7 @@ trainer:
 model:
   _target_: models.narrative_model.NarrativeModel
   batch_size: ${batch_size}
-  l_a: ${l_a}
+  la: ${la}
   n_nodes: 45
   n_edges: 200
   n_gru_layers: 5
@@ -87,8 +87,8 @@ datamodule:
   _target_: datamodules.narrative_datamodule.NarrativeDataModule
   batch_size: ${batch_size}
   sizes_dataset: ${sizes_dataset}
-  l_c: ${l_c}
-  n_c: ${n_c}
+  lc: ${lc}
+  nc: ${nc}
   n_workers: ${n_workers}
   n_shards: ${n_shards}
   path_data: ${PATH.data}
@@ -125,7 +125,7 @@ logger:
   wandb:
     _target_: pytorch_lightning.loggers.wandb.WandbLogger
     project: "narrative_graph"
-    name: ${now:%A %b-%d %H:%M}
+    name: ${now:%A %b-%d %H:%M}_nograph
     save_dir: "."
     offline: False # set True to store all logs only locally
     id: null # pass correct id to resume experiment!

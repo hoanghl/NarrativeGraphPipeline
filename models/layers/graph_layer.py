@@ -28,22 +28,22 @@ class GraphBasedReasoningLayer(torch_nn.Module):
         )
 
     def forward(self, c):
-        # c: [b, n_c, l_c, d_bert]
+        # c: [b, nc, lc, d_bert]
 
-        b, n_c, l_c, d_bert = c.size()
+        b, nc, lc, d_bert = c.size()
 
         ######################################
         # Use TransformerEncoder to encode q and c
         ######################################
         X = torch.max(c, dim=2)[0]
-        # [b, n_c, d_bert]
+        # [b, nc, d_bert]
         X = self.lin1(X)
-        # [b, n_c, d_hid]
+        # [b, nc, d_hid]
 
         # Create node feat from tensor X
         node_feats = []
         idx1, idx2 = [], []
-        for pair in combinations(range(n_c), 2):
+        for pair in combinations(range(nc), 2):
             idx1_, idx2_ = pair
             node_feats.append(torch.cat([X[:, idx1_, :], X[:, idx2_, :]], dim=-1).unsqueeze(1))
 
@@ -70,27 +70,27 @@ class GraphBasedReasoningLayer(torch_nn.Module):
         # to form weak attention hidden representation
         ######################################
         indx = torch.tensor([idx1, idx2], device=c.device, dtype=torch.long)
-        weak_att_hid = torch.zeros(b, n_c, self.d_hid, device=c.device)
+        weak_att_hid = torch.zeros(b, nc, self.d_hid, device=c.device)
         for idx_ in indx:
             weak_att_hid.index_add_(dim=1, index=idx_, source=output)
-        # [b, n_c, d_hid]
+        # [b, nc, d_hid]
 
         weak_att_hid = self.lin2(weak_att_hid)
-        # [b, n_c, d_bert]
+        # [b, nc, d_bert]
 
         ######################################
         # Concate eak attention hidden representation
         # to each token in each para of context
         # and create final representation Y
         ######################################
-        weak_att_hid = weak_att_hid.unsqueeze(2).repeat(1, 1, l_c, 1)
-        # [b, n_c, l_c, d_bert]
+        weak_att_hid = weak_att_hid.unsqueeze(2).repeat(1, 1, lc, 1)
+        # [b, nc, lc, d_bert]
 
         Y = torch.cat([c, weak_att_hid], dim=-1)
-        # [b, n_c, l_c, d_bert * 2]
+        # [b, nc, lc, d_bert * 2]
 
         Y = self.ff(Y.view(b, -1, d_bert * 2))
-        # [b, n_c*l_c, d_bert]
+        # [b, nc*lc, d_bert]
 
         return Y
 
