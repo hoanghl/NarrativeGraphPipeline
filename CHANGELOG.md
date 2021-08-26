@@ -76,7 +76,7 @@
 ## June 19 2021, 11:46
 
 - Apply data _version 4_ for training: not removing stopwords, new HTML removing, start-end extraction
-- Reduce **n_c** to _5_, **l_a** to _15_, increase **l_c** to _170_
+- Reduce **n_c** to _5_, **la** to _15_, increase **l_c** to _170_
 - Officially use BertVocab instead of own vocab
 - Use **parquet** data format instead **csv**
 - Change name of fields in _dataset.py_: **q** to **q_ids**, **paras** to **c_ids**,...

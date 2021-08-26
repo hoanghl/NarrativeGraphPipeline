@@ -34,9 +34,9 @@ n_shards: 4
 ##########################################
 ###### CONFIGURATIONS FOR EACH COMPONENT
 ##########################################
-l_q: 35
-l_c: 180
-l_a: 12
+lq: 35
+lc: 180
+la: 12
 n_c: 10
 
 sizes_dataset:
@@ -65,9 +65,9 @@ trainer:
 model:
   _target_: models.narrative_model.NarrativeModel
   batch_size: ${batch_size}
-  l_q: ${l_q}
-  l_c: ${l_c}
-  l_a: ${l_a}
+  lq: ${lq}
+  lc: ${lc}
+  la: ${la}
   n_heads: 4
   d_hid: 256
   d_bert: 768
@@ -86,7 +86,7 @@ datamodule:
   _target_: datamodules.narrative_datamodule.NarrativeDataModule
   batch_size: ${batch_size}
   sizes_dataset: ${sizes_dataset}
-  l_c: ${l_c}
+  lc: ${lc}
   n_c: ${n_c}
   n_shards: ${n_shards}
   path_data: ${PATH.data}

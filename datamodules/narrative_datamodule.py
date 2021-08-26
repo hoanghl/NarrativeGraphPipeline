@@ -10,7 +10,7 @@ class NarrativeDataModule(plt.LightningDataModule):
         self,
         batch_size,
         sizes_dataset,
-        l_c,
+        lc,
         n_c,
         n_shards,
         path_data,
@@ -20,7 +20,7 @@ class NarrativeDataModule(plt.LightningDataModule):
         super().__init__()
 
         self.batch_size = batch_size
-        self.l_c = l_c
+        self.lc = lc
         self.n_c = n_c
         self.path_data = path_data
         self.n_shards = n_shards
@@ -34,7 +34,7 @@ class NarrativeDataModule(plt.LightningDataModule):
         """Load data. Set variables: self.data_train, self.data_val, self.data_test."""
         dataset_args = {
             "path_data": self.path_data,
-            "l_c": self.l_c,
+            "lc": self.lc,
             "n_c": self.n_c,
             "n_shards": self.n_shards,
         }

@@ -5,7 +5,6 @@ from typing import Any, Optional
 import pytorch_lightning as plt
 import torch
 import torch.nn as torch_nn
-from datamodules.narrative_datamodule import NarrativeDataModule
 from transformers import (
     AdamW,
     BertTokenizer,
@@ -23,9 +22,9 @@ class NarrativeModel(plt.LightningModule):
     def __init__(
         self,
         batch_size,
-        l_q,
-        l_c,
-        l_a,
+        lq,
+        lc,
+        la,
         n_heads,
         d_hid,
         d_bert,
@@ -39,14 +38,13 @@ class NarrativeModel(plt.LightningModule):
         path_pred,
         path_train_pred,
         path_valid_pred,
-        **kwargs
     ):
 
         super().__init__()
 
         self.d_vocab = d_vocab
         self.lr = lr
-        self.l_a = l_a
+        self.la = la
         self.batch_size = batch_size
         self.size_dataset_train = size_dataset_train
         self.max_epochs = max_epochs
@@ -65,61 +63,35 @@ class NarrativeModel(plt.LightningModule):
             d_bert=d_bert, d_hid=d_hid, path_pretrained=path_pretrained
         )
         self.reasoning = Reasoning(
-            l_q=l_q,
-            l_c=l_c,
+            lq=lq,
+            lc=lc,
             n_heads=n_heads,
             d_hid=d_hid,
             dropout=dropout,
             device=self.device,
         )
         self.ans_infer = Decoder(
-            l_a=l_a,
-            d_vocab=d_vocab,
+            la=la,
             d_hid=d_hid,
+            d_vocab=d_vocab,
             dropout=dropout,
             tokenizer=self.bert_tokenizer,
             embd_layer=self.embd_layer,
+            criterion=torch_nn.CrossEntropyLoss(ignore_index=self.bert_tokenizer.pad_token_id),
         )
 
-        ## Freeeze some parameters
-        list_freeze_sets = [
-            # self.embd_layer.bert_emb.parameters(),
-            # self.ans_infer.decoder.parameters(),
-        ]
-        for params in list_freeze_sets:
-            for param in params:
-                param.requires_grad = False
-
-        #############################
-        # Define things
-        #############################
-        self.criterion = torch_nn.CrossEntropyLoss(ignore_index=self.bert_tokenizer.pad_token_id)
+        # ## Freeeze some parameters
+        # list_freeze_sets = [
+        #     # self.embd_layer.bert_emb.parameters(),
+        #     # self.ans_infer.decoder.parameters(),
+        # ]
+        # for params in list_freeze_sets:
+        #     for param in params:
+        #         param.requires_grad = False
 
     ####################################################################
     # FOR TRAINING PURPOSE
     ####################################################################
-
-    def get_loss(self, output_mle, output_ot, a_ids, a_masks, gamma=0.1):
-        # output_mle: [b, d_vocab, l_]
-        # output_ot: [b, l_a-1, d_hid]
-        # a_ids: [b, l_a]
-        # a_masks: [b, l_a]
-
-        # Calculate MLE loss
-        loss_mle = self.criterion(output_mle, a_ids[:, 1:])
-
-        # NOTE: OT loss is temporarily commented
-        # # Calculate OT loss
-        # a = self.embd_layer.encode_ans(a_ids=a_ids, a_masks=a_masks, ot_loss=True)[:, 1:]
-        # # [b, l_a-1, d_hid]
-
-        # loss_ot = ipot(output_ot, a, max_iter=400)
-
-        # total_loss = loss_mle + gamma * loss_ot
-        total_loss = loss_mle
-
-        return total_loss
-
     def get_prediction(self, output, a1_ids, a2_ids):
 
         prediction = [
@@ -135,29 +107,6 @@ class NarrativeModel(plt.LightningModule):
 
         return prediction
 
-    def get_score_from_outputs(self, outputs):
-        n_samples = 0
-        bleu_1, bleu_4, meteor, rouge_l = 0, 0, 0, 0
-        for pair in outputs:
-            try:
-                bleu_1_, bleu_4_, meteor_, rouge_l_ = get_scores(**pair)
-            except ValueError:
-                bleu_1_, bleu_4_, meteor_, rouge_l_ = 0, 0, 0, 0
-
-            bleu_1 += bleu_1_
-            bleu_4 += bleu_4_
-            meteor += meteor_
-            rouge_l += rouge_l_
-
-            n_samples += 1
-
-        return (
-            bleu_1 / n_samples,
-            bleu_4 / n_samples,
-            meteor / n_samples,
-            rouge_l / n_samples,
-        )
-
     def forward(
         self,
         q_ids,
@@ -171,12 +120,12 @@ class NarrativeModel(plt.LightningModule):
         is_predict=False,
         **kwargs
     ):
-        # q_ids: [b, l_q]
-        # q_masks: [b, l_q]
-        # c_ids: [b, n_c, l_c]
-        # c_masks: [b, n_c, l_c]
-        # a_ids: [b, l_a]
-        # a_masks: [b, l_a]
+        # q_ids: [b, lq]
+        # q_masks: [b, lq]
+        # c_ids: [b, n_c, lc]
+        # c_masks: [b, n_c, lc]
+        # a_ids: [b, la]
+        # a_masks: [b, la]
 
         ####################
         # Embed question, c and answer
@@ -187,55 +136,44 @@ class NarrativeModel(plt.LightningModule):
             q_masks=q_masks,
             c_masks=c_masks,
         )
-        # q : [b, l_q, d_hid]
-        # c: [b, n_c, l_c, d_hid]
+        # q : [b, lq, d_hid]
+        # c: [b, n_c, lc, d_hid]
 
         ####################
         # Do reasoning
         ####################
         Y = self.reasoning(q=q, c=c)
-        # [b, n_c*l_c, d_hid]
+        # [b, n_c*lc, d_hid]
 
         ####################
         # Generate answer
         ####################
 
         return (
-            self.ans_infer.do_predict(Y=Y, c_ids=c_ids.view(c_ids.size(0), -1), q=q)
+            self.ans_infer.do_predict(Y=Y, a_ids=a1_ids, a_masks=a1_masks)
             if is_predict
             else self.ans_infer.do_train(
                 Y=Y,
                 a_ids=a1_ids,
                 a_masks=a1_masks,
-                c_ids=c_ids.view(c_ids.size(0), -1),
-                q=q,
                 cur_step=cur_step,
                 max_step=max_step,
             )
         )
-        # pred: [b, d_vocab, l_a - 1]
+        # pred: [b, d_vocab, la - 1]
 
     def training_step(self, batch: Any, batch_idx: int):
-        output_mle = self(
-            **batch,
-            cur_step=batch_idx,
-            max_step=self.size_dataset_train // self.batch_size,
-        )
-        # output_mle: [b, d_vocab, l_]
-
-        a1_ids = batch["a1_ids"]
-        a2_ids = batch["a2_ids"]
-        a1_masks = batch["a1_masks"]
-        loss = self.get_loss(output_mle, None, a1_ids, a1_masks)
+        loss, logist = self(**batch, is_predict=True)
+        # logist: [b, la, d_vocab]
 
         self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=False)
 
         return {
             "loss": loss,
             "pred": (
-                torch.argmax(output_mle, dim=1).cpu().detach(),
-                a1_ids.cpu().detach(),
-                a2_ids.cpu().detach(),
+                torch.argmax(logist, dim=-1).cpu().detach(),
+                batch["a1_ids"].cpu().detach(),
+                batch["a2_ids"].cpu().detach(),
             ),
         }
 
@@ -247,7 +185,7 @@ class NarrativeModel(plt.LightningModule):
         with open(self.path_train_pred, "a+") as pred_file:
             json.dump(preds, pred_file, indent=2, ensure_ascii=False)
 
-        bleu_1, bleu_4, meteor, rouge_l = self.get_score_from_outputs(preds)
+        bleu_1, bleu_4, meteor, rouge_l = get_scores(preds)
 
         self.log("train/bleu_1", bleu_1, on_epoch=True, prog_bar=False)
         self.log("train/bleu_4", bleu_4, on_epoch=True, prog_bar=False)
@@ -258,22 +196,17 @@ class NarrativeModel(plt.LightningModule):
         return 0
 
     def validation_step(self, batch: Any, batch_idx):
-        output_mle = self(**batch, is_predict=True)
-        # output_ot: [b, l_a - 1, d_hid]
-
-        a1_ids = batch["a1_ids"]
-        a2_ids = batch["a2_ids"]
-        a1_masks = batch["a1_masks"]
-        loss = self.get_loss(output_mle, None, a1_ids, a1_masks)
+        loss, logist = self(**batch, is_predict=True)
+        # logist: [b, la, d_vocab]
 
         self.log("valid/loss", loss, on_step=False, on_epoch=True, prog_bar=False)
 
         return {
             "loss": loss,
             "pred": (
-                torch.argmax(output_mle, dim=1).cpu().detach(),
-                a1_ids.cpu().detach(),
-                a2_ids.cpu().detach(),
+                torch.argmax(logist, dim=-1).cpu().detach(),
+                batch["a1_ids"].cpu().detach(),
+                batch["a2_ids"].cpu().detach(),
             ),
         }
 
@@ -285,7 +218,8 @@ class NarrativeModel(plt.LightningModule):
         with open(self.path_valid_pred, "a+") as pred_file:
             json.dump(preds, pred_file, indent=2, ensure_ascii=False)
 
-        bleu_1, bleu_4, meteor, rouge_l = self.get_score_from_outputs(preds)
+        bleu_1, bleu_4, meteor, rouge_l = get_scores(preds)
+
         self.log("valid/bleu_1", bleu_1, on_epoch=True, prog_bar=False)
         self.log("valid/bleu_4", bleu_4, on_epoch=True, prog_bar=False)
         self.log("valid/meteor", meteor, on_epoch=True, prog_bar=False)
@@ -340,7 +274,7 @@ class NarrativeModel(plt.LightningModule):
             **batch,
             is_predict=True,
         )
-        # [b, d_vocab, l_a - 1]
+        # [b, d_vocab, la - 1]
 
         return {
             "pred": (
