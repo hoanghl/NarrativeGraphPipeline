@@ -63,8 +63,8 @@ class CHIME(torch_nn.Module):
             device=q.device,
         )
         # NOTE: If not work, use the next of following instead of the following
-        qca_masks = torch.zeros_like(qca_ids)
-        # qca_masks = torch.ones((bz, qca_ids.size(1), qca_ids.size(1)), device=device)
+        # qca_masks = torch.zeros_like(qca_ids)
+        qca_masks = torch.ones((bz, qca_ids.size(1), qca_ids.size(1)), device=device)
         qca_tok_type_id = torch.ones_like(qca_ids)
         trgs = []
         lq_np, lc_np, la_np = [], [], []
@@ -98,8 +98,8 @@ class CHIME(torch_nn.Module):
             )
             l = 1 + lq_ + 1 + lc_ + 1
             # NOTE: If not work, use the next of following instead of the following
-            qca_masks[i, :l] = torch.ones((l,), dtype=torch.long, device=device)
-            # qca_masks[i] = self._get_padding_mask(qca_ids[i], l)
+            # qca_masks[i, :l] = torch.ones((l,), dtype=torch.long, device=device)
+            qca_masks[i] = self._get_padding_mask(qca_ids[i], l)
 
             qca_tok_type_id[i, : 1 + lq_ + 1] = torch.zeros(
                 (1 + lq_ + 1,), dtype=torch.long, device=device
@@ -113,7 +113,7 @@ class CHIME(torch_nn.Module):
                 [
                     a_np,
                     torch.full((1,), self.sep_id, dtype=torch.long, device=device),
-                    torch.full((self.la - la_,), self.pad_id, dtype=torch.long, device=device),
+                    torch.full((self.la - la_ + 1,), self.pad_id, dtype=torch.long, device=device),
                 ],
                 dim=-1,
             )
@@ -137,9 +137,9 @@ class CHIME(torch_nn.Module):
                 [output[1 : 1 + lq_], output[l1 : l1 + lc_], output[l2 : l2 + l_pad_q + l_pad_c]],
                 dim=0,
             )
-            l1 = 1 + lq_ + 1 + lc_ + 1
+            l1 = 1 + lq_ + 1 + lc_
             l2 = 1 + lq_ + 1 + lc_ + 1 + la_ + 1 + l_pad_q + l_pad_c
-            p2 = torch.cat([output[l1 : l1 + la_ + 1], output[l2:]], dim=0)
+            p2 = torch.cat([output[l1 : l1 + 1 + la_ + 1], output[l2:]], dim=0)
 
             part1.append(p1.unsqueeze(0))
             part2.append(p2.unsqueeze(0))
@@ -185,7 +185,7 @@ class CHIME(torch_nn.Module):
                 a_mem = a_gate * a_mem + (1 - a_gate) * part2
 
         output_mle = self.decoder(a_mem)
-        # [b, la + 1, d_vocab]
+        # [b, la + 2, d_vocab]
 
         return output_mle.transpose(1, 2), trgs
 
@@ -202,11 +202,13 @@ class CHIME(torch_nn.Module):
 
             for _ in range(la):
                 output, _ = self(q_, c_, a)
-                topi = torch.log_softmax(output, dim=1).argmax(dim=1)
+                topi = torch.log_softmax(output[:, :, a.size(-1)], dim=-1).argmax(dim=-1)
                 if topi == self.sep_id:
                     break
-                a = torch.cat((a, topi), dim=-1)
+                a = torch.cat((a, topi.unsqueeze(-1)), dim=-1)
 
-            ans.append(a)
+            a_ = torch.full((1, la), self.pad_id, dtype=a.dtype, device=a.device)
+            a_[0, : a.size(-1)] = a[0]
+            ans.append(a_)
 
         return torch.cat(ans, dim=0)

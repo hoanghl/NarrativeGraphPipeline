@@ -16,49 +16,42 @@ def get_scores(outputs, eps=10e-8):
     n_samples = 0
     bleu_1, bleu_4, meteor, rouge_l = 0, 0, 0, 0
     for pair in outputs:
-        try:
 
-            pred = process_sent(pair["pred"])
-            ref = list(map(process_sent, pair["ref"]))
+        pred = process_sent(pair["pred"])
+        ref = list(map(process_sent, pair["ref"]))
 
-            if pred == "":
-                return 0, 0, 0, 0
-
-            # Calculate BLEU score
-            ref_ = [x.split() for x in ref]
-            pred_ = pred.split()
-
-            bleu_1 = sentence_bleu(ref_, pred_, weights=(1, 0, 0, 0))
-            bleu_4 = sentence_bleu(ref_, pred_, weights=(0.25, 0.25, 0.25, 0.25))
-
-            # Calculate METEOR
-            meteor = meteor_score(ref, pred)
-
-            # Calculate ROUGE-L
-            scores = np.array(
-                [
-                    Rouge().get_scores(ref_, pred, avg=True)["rouge-l"]["f"] if ref != "" else 0
-                    for ref_ in ref
-                ]
-            )
-            # scores = np.array(
-            #     [Rouge().get_scores(ref_, pred, avg=True)["rouge-l"]["f"] for ref_ in ref]
-            # )
-            rouge_l = np.mean(scores)
-
-            bleu_1_ = bleu_1 if bleu_1 > eps else 0
-            bleu_4_ = bleu_4 if bleu_4 > eps else 0
-            meteor_ = meteor if meteor > eps else 0
-            rouge_l_ = rouge_l if rouge_l > eps else 0
-
-        except ValueError:
+        if pred == "":
             bleu_1_, bleu_4_, meteor_, rouge_l_ = 0, 0, 0, 0
 
-        bleu_1 += bleu_1_
-        bleu_4 += bleu_4_
-        meteor += meteor_
-        rouge_l += rouge_l_
+        else:
+            try:
+                # Calculate BLEU score
+                ref_ = [x.split() for x in ref]
+                pred_ = pred.split()
 
+                bleu_1_ = sentence_bleu(ref_, pred_, weights=(1, 0, 0, 0))
+                bleu_4_ = sentence_bleu(ref_, pred_, weights=(0.25, 0.25, 0.25, 0.25))
+
+                # Calculate METEOR
+                meteor_ = meteor_score(ref, pred)
+
+                # Calculate ROUGE-L
+                scores = np.array(
+                    [
+                        Rouge().get_scores(ref_, pred, avg=True)["rouge-l"]["f"]
+                        if ref != ""
+                        else 0
+                        for ref_ in ref
+                    ]
+                )
+                rouge_l_ = np.mean(scores)
+            except ValueError:
+                bleu_1_, bleu_4_, meteor_, rouge_l_ = 0, 0, 0, 0
+
+        bleu_1 += bleu_1_ if bleu_1_ > eps else 0
+        bleu_4 += bleu_4_ if bleu_4_ > eps else 0
+        meteor += meteor_ if meteor_ > eps else 0
+        rouge_l += rouge_l_ if rouge_l_ > eps else 0
         n_samples += 1
 
     return (

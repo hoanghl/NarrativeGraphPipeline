@@ -53,8 +53,6 @@ class NarrativeModel(plt.LightningModule):
     ####################################################################
 
     def get_prediction(self, output_mle, a1_ids, a2_ids):
-        prediction = torch.argmax(output_mle, dim=1)
-
         prediction = [
             {
                 "pred": " ".join(self.bert_tokenizer.convert_ids_to_tokens(pred_)),
@@ -63,7 +61,7 @@ class NarrativeModel(plt.LightningModule):
                     " ".join(self.bert_tokenizer.convert_ids_to_tokens(ans2_)),
                 ],
             }
-            for pred_, ans1_, ans2_ in zip(prediction.squeeze(1), a1_ids, a2_ids)
+            for pred_, ans1_, ans2_ in zip(output_mle, a1_ids, a2_ids)
         ]
 
         return prediction
@@ -75,7 +73,6 @@ class NarrativeModel(plt.LightningModule):
 
         loss = self.criterion(output_mle, trgs)
         self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=False)
-        pred = torch.argmax(output_mle, dim=1)
 
         return {
             "loss": loss,
@@ -105,7 +102,7 @@ class NarrativeModel(plt.LightningModule):
         return None
 
     def validation_step(self, batch, batch_idx):
-        pred = self.model(batch["q_ids"], batch["c_ids"], batch["a1_ids"])[0]
+        pred = self.model.do_predict(batch["q_ids"], batch["c_ids"], 10)
 
         return {
             "pred": (
@@ -124,10 +121,10 @@ class NarrativeModel(plt.LightningModule):
             json.dump(preds, pred_file, indent=2, ensure_ascii=False)
 
         bleu_1, bleu_4, meteor, rouge_l = get_scores(preds)
-        self.log("train/bleu_1", bleu_1, on_epoch=True, prog_bar=False)
-        self.log("train/bleu_4", bleu_4, on_epoch=True, prog_bar=False)
-        self.log("train/meteor", meteor, on_epoch=True, prog_bar=False)
-        self.log("train/rouge_l", rouge_l, on_epoch=True, prog_bar=False)
+        self.log("valid/bleu_1", bleu_1, on_epoch=True, prog_bar=False)
+        self.log("valid/bleu_4", bleu_4, on_epoch=True, prog_bar=False)
+        self.log("valid/meteor", meteor, on_epoch=True, prog_bar=False)
+        self.log("valid/rouge_l", rouge_l, on_epoch=True, prog_bar=False)
 
     def configure_optimizers(self):
         no_decay = ["bias", "LayerNorm.weight"]

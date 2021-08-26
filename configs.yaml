@@ -90,7 +90,7 @@ datamodule:
 callbacks:
   ModelCheckpoint:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
-    monitor: "valid/loss"
+    monitor: "valid/bleu_1"
     save_top_k: 2
     save_last: True
     mode: "min"
@@ -119,7 +119,7 @@ logger:
   wandb:
     _target_: pytorch_lightning.loggers.wandb.WandbLogger
     project: "narrative_analyst"
-    name: ${now:%A %b-%d %H:%M}
+    name: ${now:%A %b-%d %H:%M}_origin
     save_dir: "."
     offline: False # set True to store all logs only locally
     id: null # pass correct id to resume experiment!
