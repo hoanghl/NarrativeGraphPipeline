@@ -1,5 +1,10 @@
 ### This file contains changes and modifications during developing.
 
+## Aug 26, 23:47
+
+- Relace current backbone by **CHIME**
+- Combine module **Graph** into backbone **CHIME**
+
 ## Aug 25, 23:51
 
 - Temporarily comment module **GraphReasoning**

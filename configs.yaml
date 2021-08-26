@@ -65,17 +65,18 @@ trainer:
 model:
   _target_: models.narrative_model.NarrativeModel
   batch_size: ${batch_size}
+  lq: ${lq}
+  lc: ${lc}
   la: ${la}
-  n_nodes: 45
-  n_edges: 200
-  n_gru_layers: 5
-  d_hid: 256
+  d_hid: 128
+  d_graph: 512
   d_bert: 768
   d_vocab: 30522
-  d_graph: 1024
+  n_edges: 60
+  n_propagations: 2
   lr: 1e-5
-  dropout: 0.15
   w_decay: 0.95
+  dropout: 0.15
   warmup_rate: 0.2
   size_dataset_train: ${sizes_dataset.train}
   max_epochs: ${trainer.max_epochs}
@@ -89,14 +90,13 @@ datamodule:
   sizes_dataset: ${sizes_dataset}
   lc: ${lc}
   nc: ${nc}
-  n_workers: ${n_workers}
   n_shards: ${n_shards}
   path_data: ${PATH.data}
 
 callbacks:
   ModelCheckpoint:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
-    monitor: "valid/loss"
+    monitor: "valid/bleu_1"
     save_top_k: 2
     save_last: True
     mode: "min"
