@@ -2,6 +2,12 @@
 
 ### This file contains changes and modifications during developing.
 
+## Aug 27, 16:19
+
+- Remove old backbone and replace by **CHIME**'s backbone
+- Add module **Persistent Memory Cell** into backbone
+- Modify some functions to match with: loss with 2 answers, use OT loss
+
 ## Aug 22, 18:45
 
 - Replace BertDecoder by LSTM with PGN, no Sched Sampling

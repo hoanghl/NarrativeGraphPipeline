@@ -69,7 +69,6 @@ model:
   lc: ${lc}
   la: ${la}
   n_heads: 4
-  d_hid: 256
   d_bert: 768
   d_vocab: 30522
   lr: 1e-5
