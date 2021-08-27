@@ -2,6 +2,13 @@
 
 ### This file contains changes and modifications during developing.
 
+## Aug 27 2021, 21:56
+
+- Replace original backbok by **CHIME** backbone
+- Add **Persistent Memory Cell** into backbone
+- Add functionalities: calculate MLE loss with 2 answers, OT loss, BERT loss
+- Some other changes and fixes
+
 ## July 23 2021, 16:51
 
 - Use data **v4.3**: change value of many fields

@@ -35,10 +35,10 @@ n_shards: 4
 ##########################################
 ###### CONFIGURATIONS FOR EACH COMPONENT
 ##########################################
-l_q: 35
-l_c: 180
-l_a: 12
-n_c: 10
+lq: 35
+lc: 180
+la: 12
+nc: 10
 
 trainer:
   _target_: pytorch_lightning.Trainer
@@ -61,10 +61,10 @@ trainer:
 model:
   _target_: model_utils.narrative_model.NarrativeModel
   batch_size: ${batch_size}
-  l_q: ${l_q}
-  l_c: ${l_c}
-  l_a: ${l_a}
-  n_c: ${n_c}
+  lq: ${lq}
+  lc: ${lc}
+  la: ${la}
+  nc: ${nc}
   n_heads: 4
   d_hid: 64
   d_bert: 768
@@ -87,18 +87,18 @@ datamodule:
     train: 32747
     test: 10557
     valid: 3461
-  l_c: ${l_c}
-  n_c: ${n_c}
+  lc: ${lc}
+  nc: ${nc}
   n_shards: ${n_shards}
   path_data: ${PATH.data}
 
 callbacks:
   ModelCheckpoint:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
-    monitor: "valid/loss"
+    monitor: "valid/bleu_1"
     save_top_k: 2
     save_last: True
-    mode: "min"
+    mode: "mã"
     dirpath: ${PATH.log}/tensorboard/ckpts/
     filename: "narrative_weam_bertloss-{epoch:02d}"
   # EarlyStopping:

@@ -1,10 +1,10 @@
-from random import sample
 import glob
+from random import sample
 
-from torch.utils.data import Dataset
-import torch
-import pandas as pd
 import numpy as np
+import pandas as pd
+import torch
+from torch.utils.data import Dataset
 
 
 class NarrativeDataset(Dataset):
@@ -13,14 +13,14 @@ class NarrativeDataset(Dataset):
         split,
         path_data,
         size_dataset,
-        n_c,
-        l_c,
+        nc,
+        lc,
         n_shards,
     ):
 
         self.split = split
-        self.n_c = n_c
-        self.l_c = l_c
+        self.nc = nc
+        self.lc = lc
         self.n_shards = n_shards
         self.size_dataset = size_dataset
 
@@ -37,7 +37,7 @@ class NarrativeDataset(Dataset):
         self.c_ids = None
         self.c_masks = None
 
-        self.exchange_rate = 0
+        self.exchange_rate = 0.5
 
     def __len__(self) -> int:
         return self.size_dataset
@@ -73,7 +73,7 @@ class NarrativeDataset(Dataset):
         }
 
     def _get_context(self, En, Hn):
-        n_samples = min((len(En), self.n_c))
+        n_samples = min((len(En), self.nc))
         if self.split == "train":
             selects_Hn = int(n_samples * self.exchange_rate)
             selects_En = n_samples - selects_Hn
@@ -100,13 +100,13 @@ class NarrativeDataset(Dataset):
             self.a1_masks.append(np.copy(entry.a1_masks))
             self.a2_ids.append(np.copy(entry.a2_ids))
 
-            c_E_ids = np.copy(np.reshape(entry.c_E_ids, (-1, self.l_c)))
-            c_E_masks = np.copy(np.reshape(entry.c_E_masks, (-1, self.l_c)))
-            c_H_ids = np.copy(np.reshape(entry.c_H_ids, (-1, self.l_c)))
-            c_H_masks = np.copy(np.reshape(entry.c_H_masks, (-1, self.l_c)))
+            c_E_ids = np.copy(np.reshape(entry.c_E_ids, (-1, self.lc)))
+            c_E_masks = np.copy(np.reshape(entry.c_E_masks, (-1, self.lc)))
+            c_H_ids = np.copy(np.reshape(entry.c_H_ids, (-1, self.lc)))
+            c_H_masks = np.copy(np.reshape(entry.c_H_masks, (-1, self.lc)))
 
-            c_ids = np.zeros((self.n_c, self.l_c), dtype=int)
-            c_masks = np.zeros((self.n_c, self.l_c), dtype=int)
+            c_ids = np.zeros((self.nc, self.lc), dtype=int)
+            c_masks = np.zeros((self.nc, self.lc), dtype=int)
 
             n_samples = c_E_ids.shape[0]
             if self.split == "train":
@@ -131,5 +131,5 @@ class NarrativeDataset(Dataset):
             self.c_ids.append(c_ids)
             self.c_masks.append(c_masks)
 
-    def switch_answerability(self):
-        self.exchange_rate = min((1, self.exchange_rate + 0.25))
+    # def switch_answerability(self):
+    #     self.exchange_rate = min((1, self.exchange_rate + 0.25))

@@ -65,9 +65,7 @@ def extras(config: DictConfig) -> None:
 
     # force debugger friendly configuration if <config.trainer.fast_dev_run=True>
     if config.trainer.get("fast_dev_run"):
-        log.info(
-            "Forcing debugger friendly configuration! <config.trainer.fast_dev_run=True>"
-        )
+        log.info("Forcing debugger friendly configuration! <config.trainer.fast_dev_run=True>")
         # Debuggers don't like GPUs or multiprocessing
         if config.trainer.get("gpus"):
             config.trainer.gpus = 0
@@ -79,9 +77,7 @@ def extras(config: DictConfig) -> None:
     # force multi-gpu friendly configuration if <config.trainer.accelerator=ddp>
     accelerator = config.trainer.get("accelerator")
     if accelerator in ["ddp", "ddp_spawn", "dp", "ddp2"]:
-        log.info(
-            f"Forcing ddp friendly configuration! <config.trainer.accelerator={accelerator}>"
-        )
+        log.info(f"Forcing ddp friendly configuration! <config.trainer.accelerator={accelerator}>")
         if config.datamodule.get("n_workers"):
             config.datamodule.n_workers = 0
         if config.datamodule.get("pin_memory"):
@@ -250,11 +246,7 @@ class CustomSampler(Sampler[int]):
         self.indices = []
         for nth_shard in shard_order:
             start = size_shard * nth_shard
-            end = (
-                start + size_shard
-                if nth_shard != max(shard_order)
-                else self.size_dataset
-            )
+            end = start + size_shard if nth_shard != max(shard_order) else self.size_dataset
             indices = sample(range(start, end), end - start)
 
             self.indices.extend(indices)
@@ -281,9 +273,7 @@ class ParallelHelper:
         for ith in range(n_workers):
             lo_bound = ith * self.n_data // n_workers
             hi_bound = (
-                (ith + 1) * self.n_data // n_workers
-                if ith < (n_workers - 1)
-                else self.n_data
+                (ith + 1) * self.n_data // n_workers if ith < (n_workers - 1) else self.n_data
             )
 
             p = multiprocessing.Process(
@@ -327,11 +317,11 @@ class ParallelHelper:
 def ipot(a1: torch.Tensor, a2: torch.Tensor, beta=2, max_iter=1000, L=1):
     """Calculate loss based on OT."""
 
-    b, l_a, d_hid = a1.size()
-    n = b * l_a
+    b, la, d_hid = a1.size()
+    n = b * la
 
-    # a1: [b, l_a, d_hid]
-    # a2: [b, l_a, d_hid]
+    # a1: [b, la, d_hid]
+    # a2: [b, la, d_hid]
 
     a1, a2 = a1.view(-1, d_hid), a2.view(-1, d_hid)
     # [n, d_hid]
@@ -404,9 +394,7 @@ def get_scores(ref: list, pred, eps=10e-8):
     meteor = meteor_score(ref, pred)
 
     # Calculate ROUGE-L
-    scores = np.array(
-        [Rouge().get_scores(ref_, pred, avg=True)["rouge-l"]["f"] for ref_ in ref]
-    )
+    scores = np.array([Rouge().get_scores(ref_, pred, avg=True)["rouge-l"]["f"] for ref_ in ref])
     rouge_l = np.mean(scores)
 
     return (
