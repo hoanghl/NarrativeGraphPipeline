@@ -13,16 +13,16 @@ class NarrativeDataset(Dataset):
         split,
         size_dataset,
         path_data,
-        l_c,
-        n_c,
+        lc,
+        nc,
         n_shards,
     ):
 
         self.split = split
         self.n_shards = n_shards
         self.size_dataset = size_dataset
-        self.l_c = l_c
-        self.n_c = n_c
+        self.lc = lc
+        self.nc = nc
         self.curent_ith_file = -1
 
         path_data = path_data.replace("[SPLIT]", split).replace("[SHARD]", "*")
@@ -66,7 +66,7 @@ class NarrativeDataset(Dataset):
         }
 
     def _get_context(self, En, Hn):
-        n_samples = min((len(En), self.n_c))
+        n_samples = min((len(En), self.nc))
         if self.split == "train":
             selects_Hn = int(n_samples * self.exchange_rate)
             selects_En = n_samples - selects_Hn
@@ -88,15 +88,15 @@ class NarrativeDataset(Dataset):
             a1 = entry.a1_ids[(entry.a1_ids != 101) & (entry.a1_ids != 102)]
             a2 = entry.a1_ids[(entry.a1_ids != 101) & (entry.a1_ids != 102)]
             cE = entry.c_E_ids[(entry.c_E_ids != 101) & (entry.c_E_ids != 102)]
-            cE = np.reshape(cE, (-1, self.l_c))
+            cE = np.reshape(cE, (-1, self.lc))
             cH = entry.c_H_ids[(entry.c_H_ids != 101) & (entry.c_H_ids != 102)]
-            cH = np.reshape(cH, (-1, self.l_c))
+            cH = np.reshape(cH, (-1, self.lc))
 
             self.q_ids.append(np.copy(q))
             self.a1_ids.append(np.copy(a1))
             self.a2_ids.append(np.copy(a2))
 
-            c = np.zeros((self.n_c, self.l_c), dtype=int)
+            c = np.zeros((self.nc, self.lc), dtype=int)
             n_samples = cE.shape[0]
             if self.split == "train":
 

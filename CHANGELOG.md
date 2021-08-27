@@ -2,6 +2,12 @@
 
 ### This file contains changes and modifications during developing.
 
+## Aug 27, 19:03
+
+- Move loss to model
+- Add functionality: OT loss, calculate loss with 2 targets
+- Fix some errors
+
 ## Aug 24, 16:26
 
 - Reimplement model **CHIME**

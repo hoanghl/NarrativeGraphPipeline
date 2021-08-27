@@ -1,13 +1,13 @@
 import torch
 import torch.nn as torch_nn
 from transformers import BertModel, BertTokenizer, logging
-from utils.model_utils import TransEncoder
+from utils.model_utils import TransEncoder, ipot
 
 logging.set_verbosity_error()
 
 
 class CHIME(torch_nn.Module):
-    def __init__(self, lq, lc, d_bert, d_vocab, path_pretrained):
+    def __init__(self, lq, lc, d_bert, d_vocab, path_pretrained, criterion):
         super().__init__()
 
         self.lq = lq
@@ -25,6 +25,8 @@ class CHIME(torch_nn.Module):
         self.gate_a = torch_nn.Sequential(torch_nn.Linear(d_bert * 2, 1), torch_nn.Sigmoid())
         self.decoder = torch_nn.Linear(d_bert, d_vocab)
 
+        self.criterion = criterion
+
         ## Init
         self.decoder.weight = self.encoder.embeddings.word_embeddings.weight
         self.decoder.bias.data.zero_()
@@ -37,6 +39,25 @@ class CHIME(torch_nn.Module):
     # l_qca = 1 + lq + 1 + lc + 1 + la + 1
     #
 
+    def get_loss(self, output_mle, trgs, is_loss_ot=False, gamma=0.08):
+        loss = 0
+        for output, trg in zip(output_mle, trgs):
+            loss_mle = self.criterion(output, trg)
+
+            if is_loss_ot:
+                trg = self.encoder(trg)
+                pred = (
+                    torch.softmax(output_mle.transpose(-1, -2), dim=-1)
+                    @ self.encoder.embeddings.word_embeddings.weight
+                )
+                loss_ot = ipot(pred, trg, max_iter=400)
+            else:
+                loss_ot = 0
+
+            loss += loss_mle + gamma * loss_ot
+
+        return loss / len(trgs)
+
     def _get_padding_mask(self, qca_ids, sen_1_leng):
         s_l = qca_ids.size(0)
         ones = torch.ones((s_l, s_l), device=qca_ids.device)
@@ -48,9 +69,9 @@ class CHIME(torch_nn.Module):
         return mask
 
     def create_misc(self, q, c, a):
-        # q: [b, l_q]
-        # r: [b, l_c]
-        # a: [b, l_a]
+        # q: [b, lq]
+        # r: [b, lc]
+        # a: [b, la]
 
         bz = q.size(0)
         device = q.device
@@ -147,9 +168,9 @@ class CHIME(torch_nn.Module):
         return torch.cat(part1, dim=0), torch.cat(part2, dim=0)
 
     def forward(self, q, c, a):
-        # q: [b, l_q]
-        # c: [b, n_c, l_c]
-        # a: [b, l_a]
+        # q: [b, lq]
+        # c: [b, nc, lc]
+        # a: [b, la]
 
         self.la = a.size(-1)
 
@@ -189,8 +210,19 @@ class CHIME(torch_nn.Module):
 
         return output_mle.transpose(1, 2), trgs
 
-    def do_train(self, q, c, a):
-        return self(q, c, a)
+    def do_train(self, q, c, a1, a2, use_2_ans=False):
+        output_mle, trgs = [], []
+        ans = [a1, a2] if use_2_ans else [a1]
+        for a in ans:
+            output_mle_, trgs_ = self(q, c, a)
+
+            output_mle.append(output_mle_)
+            trgs.append(trgs_)
+
+        # NOTE: can set is_loss_ot=true
+        loss = self.get_loss(output_mle, trgs)
+
+        return loss, output_mle
 
     def do_predict(self, q, c, la):
         bz = q.size(0)

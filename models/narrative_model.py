@@ -13,8 +13,9 @@ class NarrativeModel(plt.LightningModule):
     def __init__(
         self,
         batch_size,
-        l_q,
-        l_c,
+        lq,
+        lc,
+        la,
         d_bert,
         d_vocab,
         lr,
@@ -28,6 +29,7 @@ class NarrativeModel(plt.LightningModule):
     ):
         super().__init__()
 
+        self.la = la
         self.lr = lr
         self.w_decay = w_decay
         self.warmup_rate = warmup_rate
@@ -40,53 +42,59 @@ class NarrativeModel(plt.LightningModule):
         # Define model
         #############################
         self.model = CHIME(
-            lq=l_q, lc=l_c, d_bert=d_bert, d_vocab=d_vocab, path_pretrained=path_pretrained
+            lq=lq,
+            lc=lc,
+            d_bert=d_bert,
+            d_vocab=d_vocab,
+            path_pretrained=path_pretrained,
+            criterion=torch_nn.CrossEntropyLoss(ignore_index=self.bert_tokenizer.pad_token_id),
         )
-
-        #############################
-        # Define things
-        #############################
-        self.criterion = torch_nn.CrossEntropyLoss(ignore_index=self.bert_tokenizer.pad_token_id)
 
     ####################################################################
     # FOR TRAINING PURPOSE
     ####################################################################
-
-    def get_prediction(self, output_mle, a1_ids, a2_ids):
-        prediction = [
+    def get_prediction(self, pairs):
+        pairs = [
             {
-                "pred": " ".join(self.bert_tokenizer.convert_ids_to_tokens(pred_)),
-                "ref": [
-                    " ".join(self.bert_tokenizer.convert_ids_to_tokens(ans1_)),
-                    " ".join(self.bert_tokenizer.convert_ids_to_tokens(ans2_)),
+                "pred": [
+                    " ".join(self.bert_tokenizer.convert_ids_to_tokens(p)) for p in pair["pred"]
+                ],
+                "trg": [
+                    " ".join(self.bert_tokenizer.convert_ids_to_tokens(p)) for p in pair["trg"]
                 ],
             }
-            for pred_, ans1_, ans2_ in zip(output_mle, a1_ids, a2_ids)
+            for pair in pairs
         ]
 
-        return prediction
+        return pairs
 
-    def training_step(self, batch, batch_idx):
-        output_mle, trgs = self.model(batch["q_ids"], batch["c_ids"], batch["a1_ids"])
-        # trgs: [b, l_a + 1]
-        # output_mle: [b, d_vocab, l_a + 1]
+    def training_step(self, batch, batch_idx: int):
+        loss, logist = self.model.do_train(
+            batch["q_ids"], batch["c_ids"], batch["a1_ids"], batch["a2_ids"], use_2_ans=False
+        )
+        # logist: list of [b, la, d_vocab]
 
-        loss = self.criterion(output_mle, trgs)
         self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=False)
+        # logist: list of [b, la, d_vocab]
 
-        return {
-            "loss": loss,
-            "pred": (
-                torch.argmax(output_mle, dim=1).cpu().detach(),
-                batch["a1_ids"].cpu().detach(),
-                batch["a2_ids"].cpu().detach(),
-            ),
-        }
+        logist = [torch.argmax(logist_, dim=1) for logist_ in logist]
+        trgs = [batch["a1_ids"], batch["a2_ids"]] if len(logist) > 1 else [batch["a1_ids"]]
+
+        bz = batch["q_ids"].size(0)
+        preds = [
+            {
+                "pred": [logit[i].tolist() for logit in logist],
+                "trg": [trg[i].tolist() for trg in trgs],
+            }
+            for i in range(bz)
+        ]
+
+        return {"loss": loss, "pred": preds}
 
     def training_epoch_end(self, outputs) -> None:
         preds = []
-        for p in [out["pred"] for out in outputs]:
-            preds.extend(self.get_prediction(p[0], p[1], p[2]))
+        for pred in [out["pred"] for out in outputs]:
+            preds.extend(self.get_prediction(pred))
 
         with open(self.path_train_pred, "a+") as pred_file:
             json.dump(preds, pred_file, indent=2, ensure_ascii=False)
@@ -102,25 +110,33 @@ class NarrativeModel(plt.LightningModule):
         return None
 
     def validation_step(self, batch, batch_idx):
-        pred = self.model.do_predict(batch["q_ids"], batch["c_ids"], 10)
+        logist = self.model.do_predict(batch["q_ids"], batch["c_ids"], self.la)
+        # logist: [b, la]
 
-        return {
-            "pred": (
-                pred.cpu().detach(),
-                batch["a1_ids"].cpu().detach(),
-                batch["a2_ids"].cpu().detach(),
-            ),
-        }
+        logist = [logist, logist]
+        trgs = [batch["a1_ids"], batch["a2_ids"]]
+
+        bz = batch["q_ids"].size(0)
+        preds = [
+            {
+                "pred": [logit[i].tolist() for logit in logist],
+                "trg": [trg[i].tolist() for trg in trgs],
+            }
+            for i in range(bz)
+        ]
+
+        return {"pred": preds}
 
     def validation_epoch_end(self, outputs) -> None:
         preds = []
-        for p in [out["pred"] for out in outputs]:
-            preds.extend(self.get_prediction(p[0], p[1], p[2]))
+        for pred in [out["pred"] for out in outputs]:
+            preds.extend(self.get_prediction(pred))
 
-        with open(self.path_valid_pred, "a+") as pred_file:
+        with open(self.path_train_pred, "a+") as pred_file:
             json.dump(preds, pred_file, indent=2, ensure_ascii=False)
 
         bleu_1, bleu_4, meteor, rouge_l = get_scores(preds)
+
         self.log("valid/bleu_1", bleu_1, on_epoch=True, prog_bar=False)
         self.log("valid/bleu_4", bleu_4, on_epoch=True, prog_bar=False)
         self.log("valid/meteor", meteor, on_epoch=True, prog_bar=False)

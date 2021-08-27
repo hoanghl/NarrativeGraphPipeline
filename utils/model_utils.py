@@ -6,52 +6,90 @@ import torch.nn as nn
 from nltk.translate.bleu_score import sentence_bleu
 from nltk.translate.meteor_score import meteor_score
 from rouge import Rouge
+from transformers.generation_utils import *
+
+
+def ipot(a1, a2, beta=2, max_iter=100, L=1):
+    """Calculate loss based on OT."""
+
+    b, la, d_hid = a1.size()
+    n = b * la
+
+    # a1: [b, la, d_hid]
+    # a2: [b, la, d_hid]
+
+    a1, a2 = a1.reshape(-1, d_hid), a2.reshape(-1, d_hid)
+    # [n, d_hid]
+
+    # Calculate matrix C
+    a1_norm = a1 / a1.norm(dim=1)[:, None]
+    a2_norm = a2 / a2.norm(dim=1)[:, None]
+    C = a1_norm @ a2_norm.transpose(0, 1)
+    # [n, n]
+
+    sigma = torch.ones((n, 1), device=a1.device) / n
+
+    T = torch.ones((n, n), device=a1.device) / n ** 2
+    # [n, n]
+    A = torch.exp(-(C / beta))
+    # [n, n]
+
+    for _ in range(max_iter):
+        Q = A * T
+        # [n, n]
+
+        for _ in range(L):
+            d = 1 / n / (Q @ sigma)
+            sigma = 1 / n / (Q.T @ d)
+
+        d1 = torch.diag(d.squeeze(1))
+        d2 = torch.diag(sigma.squeeze(1))
+        T = d1 * Q * d2
+
+    loss = torch.sum(T * C)
+
+    return loss
 
 
 def process_sent(sent):
-    return re.sub(r"(\[PAD\]|\[CLS\]|\[SEP\]|\[UNK\]|\[MASK\])", "", sent).strip()
+    sent = re.sub(r"(\[PAD\]|\[CLS\]|\[SEP\]|\[UNK\]|\[MASK\])", "", sent).strip()
+    sent = re.sub(r"\s{2,}", " ", sent)
+
+    return sent
 
 
 def get_scores(outputs, eps=10e-8):
     n_samples = 0
     bleu_1, bleu_4, meteor, rouge_l = 0, 0, 0, 0
     for pair in outputs:
+        preds = list(map(process_sent, pair["pred"]))
+        refs = list(map(process_sent, pair["trg"]))
 
-        pred = process_sent(pair["pred"])
-        ref = list(map(process_sent, pair["ref"]))
+        bleu_1_, bleu_4_, meteor_, rouge_l_ = 0, 0, 0, 0
+        for pred, ref in zip(preds, refs):
+            if pred == "":
+                continue
 
-        if pred == "":
-            bleu_1_, bleu_4_, meteor_, rouge_l_ = 0, 0, 0, 0
-
-        else:
             try:
-                # Calculate BLEU score
-                ref_ = [x.split() for x in ref]
-                pred_ = pred.split()
-
-                bleu_1_ = sentence_bleu(ref_, pred_, weights=(1, 0, 0, 0))
-                bleu_4_ = sentence_bleu(ref_, pred_, weights=(0.25, 0.25, 0.25, 0.25))
-
-                # Calculate METEOR
-                meteor_ = meteor_score(ref, pred)
-
-                # Calculate ROUGE-L
-                scores = np.array(
-                    [
-                        Rouge().get_scores(ref_, pred, avg=True)["rouge-l"]["f"]
-                        if ref != ""
-                        else 0
-                        for ref_ in ref
-                    ]
+                bleu_1_ += sentence_bleu([ref.split()], pred.split(), weights=(1, 0, 0, 0))
+                bleu_4_ += sentence_bleu(
+                    [ref.split()], pred.split(), weights=(0.25, 0.25, 0.25, 0.25)
                 )
-                rouge_l_ = np.mean(scores)
+                meteor_ += meteor_score([ref], pred)
+                rouge_l_ += Rouge().get_scores(ref, pred, avg=True)["rouge-l"]["f"]
             except ValueError:
-                bleu_1_, bleu_4_, meteor_, rouge_l_ = 0, 0, 0, 0
+                pass
+
+        bleu_1_ /= len(preds)
+        bleu_4_ /= len(preds)
+        meteor_ /= len(preds)
+        rouge_l_ /= len(preds)
 
         bleu_1 += bleu_1_ if bleu_1_ > eps else 0
         bleu_4 += bleu_4_ if bleu_4_ > eps else 0
         meteor += meteor_ if meteor_ > eps else 0
         rouge_l += rouge_l_ if rouge_l_ > eps else 0
+
         n_samples += 1
 
     return (

@@ -36,10 +36,10 @@ batch_size: 5
 n_workers: 8
 n_shards: 4
 
-l_q: 33
-n_c: 10
-l_c: 178
-l_a: 10
+lq: 33
+nc: 10
+lc: 178
+la: 10
 sizes_dataset:
   train: 32747
   test: 10557
@@ -65,8 +65,9 @@ trainer:
 model:
   _target_: models.narrative_model.NarrativeModel
   batch_size: ${batch_size}
-  l_q: ${l_q}
-  l_c: ${l_c}
+  lq: ${lq}
+  lc: ${lc}
+  la: ${la}
   d_bert: 768
   d_vocab: 30522
   lr: 1e-5
@@ -82,8 +83,8 @@ datamodule:
   _target_: datamodules.narrative_datamodule.NarrativeDataModule
   batch_size: ${batch_size}
   sizes_dataset: ${sizes_dataset}
-  l_c: ${l_c}
-  n_c: ${n_c}
+  lc: ${lc}
+  nc: ${nc}
   n_shards: ${n_shards}
   path_data: ${PATH.data}
 
@@ -93,7 +94,7 @@ callbacks:
     monitor: "valid/bleu_1"
     save_top_k: 2
     save_last: True
-    mode: "min"
+    mode: "max"
     dirpath: "chkpts/"
     filename: "narrative_graph-{epoch:02d}"
   LearningRateMonitor:
