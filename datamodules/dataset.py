@@ -34,6 +34,7 @@ class NarrativeDataset(Dataset):
         self.a1_ids = None
         self.a1_masks = None
         self.a2_ids = None
+        self.a2_masks = None
         self.c_ids = None
         self.c_masks = None
 
@@ -68,6 +69,7 @@ class NarrativeDataset(Dataset):
             "a1_ids": self.a1_ids[indx],
             "a2_ids": self.a2_ids[indx],
             "a1_masks": self.a1_masks[indx],
+            "a2_masks": self.a2_masks[indx],
             "c_ids": self.c_ids[indx],
             "c_masks": self.c_masks[indx],
         }
@@ -83,12 +85,19 @@ class NarrativeDataset(Dataset):
         return sample(Hn, n_samples)
 
     def read_datasetfile(self, path_file):
+        def get_masks(ids):
+            masks = np.zeros(ids.shape)
+            masks[: ids[ids != 0].shape[0]] = 1
+
+            return masks
+
         df = pd.read_parquet(path_file)
 
         self.q_ids = []
         self.q_masks = []
         self.a1_ids = []
         self.a1_masks = []
+        self.a2_masks = []
         self.a2_ids = []
         self.c_ids = []
         self.c_masks = []
@@ -99,6 +108,7 @@ class NarrativeDataset(Dataset):
             self.a1_ids.append(np.copy(entry.a1_ids))
             self.a1_masks.append(np.copy(entry.a1_masks))
             self.a2_ids.append(np.copy(entry.a2_ids))
+            self.a2_masks.append(get_masks(entry.a2_ids))
 
             c_E_ids = np.copy(np.reshape(entry.c_E_ids, (-1, self.lc)))
             c_E_masks = np.copy(np.reshape(entry.c_E_masks, (-1, self.lc)))

@@ -14,6 +14,7 @@ class CHIME(torch_nn.Module):
         self,
         lq,
         lc,
+        la,
         d_bert,
         n_heads,
         d_vocab,
@@ -45,7 +46,10 @@ class CHIME(torch_nn.Module):
 
         self.criterion = criterion
         self.bertloss = BertLoss(
-            path_pretrained=path_pretrained, path_saved_bert=path_saved_bert, d_vocab=d_vocab
+            la=la,
+            path_pretrained=path_pretrained,
+            path_saved_bert=path_saved_bert,
+            d_vocab=d_vocab,
         )
 
         ## Init
@@ -75,27 +79,29 @@ class CHIME(torch_nn.Module):
         for output, trg in zip(output_mle, trgs):
             loss_mle = self.criterion(output, trg)
 
+            loss += loss_mle
+
             if is_loss_ot:
-                trg = self.encoder(trg)
+                trg = self.encoder(trg)[0]
                 pred = (
-                    torch.softmax(output_mle.transpose(-1, -2), dim=-1)
+                    torch.softmax(output.transpose(-1, -2), dim=-1)
                     @ self.encoder.embeddings.word_embeddings.weight
                 )
                 loss_ot = ipot(pred, trg, max_iter=400)
             else:
                 loss_ot = 0
+            loss += gamma * loss_ot
 
-            loss += loss_mle + gamma * loss_ot
-
-        if is_loss_bert:
-            trgs = trgs.transpose(-1, -2)
-            loss += eta * self.bertloss(
-                pred=trgs[:, 1:-1],
-                a1_ids=a1_ids,
-                a1_masks=a1_masks,
-                a2_ids=a2_ids,
-                a2_masks=a2_masks,
-            )
+            if is_loss_bert:
+                output = torch.softmax(output.transpose(-1, -2), dim=-1)
+                loss_bert = eta * self.bertloss(
+                    pred=output[:, 1:-1],
+                    a1_ids=a1_ids,
+                    a1_masks=a1_masks,
+                    a2_ids=a2_ids,
+                    a2_masks=a2_masks,
+                )
+                loss += loss_bert
 
         return loss / len(trgs)
 

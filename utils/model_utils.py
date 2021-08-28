@@ -240,10 +240,11 @@ class TransEncoder(nn.Module):
 
 
 class BertLoss(torch_nn.Module):
-    def __init__(self, path_pretrained, path_saved_bert, d_vocab):
+    def __init__(self, la, path_pretrained, path_saved_bert, d_vocab):
         super().__init__()
         self.bert = BertModel.from_pretrained(path_pretrained)
         self.bert.load_state_dict(torch.load(path_saved_bert))
+        self.batchnorm = torch_nn.BatchNorm1d(la)
 
         self.d_vocab = d_vocab
 
@@ -262,15 +263,16 @@ class BertLoss(torch_nn.Module):
         # [b, la, d_vocab]
         a = a @ self.bert.embeddings.word_embeddings.weight
         # [b, la, d_bert]
+        a = self.batchnorm(a)
 
         return a
 
     def conv_ids2embd(self, a):
         # a: [b, l_]
         b, l_ = a.size()
-        indices = a.unsqueeze(-1)
-        a = torch.full((b, l_, self.d_vocab), 1e-6)
-        a.scatter_(dim=-1, index=indices, src=torch.full(indices.size(), 0.99))
+        indices = a.unsqueeze(-1).long()
+        a = torch.full((b, l_, self.d_vocab), 1e-6, device=a.device)
+        a.scatter_(dim=-1, index=indices, src=torch.full(indices.size(), 0.99, device=a.device))
 
         return a
 
@@ -343,6 +345,11 @@ class BertLoss(torch_nn.Module):
         w_a1 = torch.tensor(idf_weights_a1, device=device, dtype=dtype)
         w_a2 = torch.tensor(idf_weights_a2, device=device, dtype=dtype)
         w_p = torch.tensor(idf_weights_p, device=device, dtype=dtype)
+
+        # This to prevent division by zero in next step
+        w_a1 += 1e-3
+        w_a2 += 1e-3
+        w_p += 1e-3
 
         R1 = cos_sim1.max(dim=-1)[0] * w_a1
         R1 = R1.sum(dim=-1) / w_a1.sum(dim=-1)

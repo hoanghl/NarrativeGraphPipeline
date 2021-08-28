@@ -60,6 +60,7 @@ class NarrativeModel(plt.LightningModule):
         self.model = CHIME(
             lq=lq,
             lc=lc,
+            la=la,
             d_bert=d_bert,
             n_heads=n_heads,
             d_vocab=d_vocab,

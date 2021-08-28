@@ -2,6 +2,13 @@
 
 ### This file contains changes and modifications during developing.
 
+## Aug 28, 16:14
+
+- Add _0.001_ to tensor in module **BertLoss** to prevent Division by 0
+- Add _BatchNorm_ in module _BertLoss_ to prevent NaN loss
+- Add function creating _a2 mask_ in module _NarrativeDataset_
+-
+
 ## Aug 27 2021, 21:56
 
 - Replace original backbok by **CHIME** backbone
