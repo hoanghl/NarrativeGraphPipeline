@@ -247,9 +247,8 @@ class BertLoss(torch_nn.Module):
 
         self.d_vocab = d_vocab
 
-        for params in self.bert:
-            for param in params:
-                param.requires_grad = False
+        for param in self.bert.parameters():
+            param.requires_grad = False
 
     def encode(self, a_ids, a_masks, a_=None):
         # a_ids: [b, la]

@@ -28,6 +28,11 @@ PATH:
 
 mode: train
 
+sizes_dataset:
+  train: 32747
+  test: 10557
+  valid: 3461
+
 batch_size: 5
 n_workers: 4
 n_shards: 4
@@ -44,14 +49,14 @@ trainer:
   _target_: pytorch_lightning.Trainer
   gpus: 1
   min_epochs: 1
-  max_epochs: 100
+  max_epochs: 60
+  # precision: 16
   auto_lr_find: False
   terminate_on_nan: True
   log_every_n_steps: 40
   auto_scale_batch_size: False
   gradient_clip_val: 1.0
   accelerator: null
-  precision: 16
   check_val_every_n_epoch: 1
   reload_dataloaders_every_epoch: True
   weights_summary: "top"
@@ -59,34 +64,29 @@ trainer:
   resume_from_checkpoint: ${PATH.log}/last_best.ckpt
 
 model:
-  _target_: model_utils.narrative_model.NarrativeModel
+  _target_: models.narrative_model.NarrativeModel
   batch_size: ${batch_size}
   lq: ${lq}
   lc: ${lc}
   la: ${la}
-  nc: ${nc}
   n_heads: 4
-  d_hid: 64
   d_bert: 768
   d_vocab: 30522
   lr: 1e-5
-  w_decay: 1e-2
+  w_decay: 1e-1
   dropout: 0.2
-  beam_size: 20
-  n_gram_beam: 8
+  size_dataset_train: ${sizes_dataset.train}
+  max_epochs: ${trainer.max_epochs}
+  warmup_rate: 0.22
   path_pretrained: ${PATH.pretrained}
   path_saved_bert: ${PATH.saved_bert}
-  path_pred: ${PATH.log}/pred.json
   path_train_pred: ${PATH.log}/train_pred.json
   path_valid_pred: ${PATH.log}/valid_pred.json
 
 datamodule:
-  _target_: data_utils.narrative_datamodule.NarrativeDataModule
+  _target_: datamodules.narrative_datamodule.NarrativeDataModule
   batch_size: ${batch_size}
-  sizes_dataset:
-    train: 32747
-    test: 10557
-    valid: 3461
+  sizes_dataset: ${sizes_dataset}
   lc: ${lc}
   nc: ${nc}
   n_shards: ${n_shards}
@@ -98,7 +98,7 @@ callbacks:
     monitor: "valid/bleu_1"
     save_top_k: 2
     save_last: True
-    mode: "mã"
+    mode: "max"
     dirpath: ${PATH.log}/tensorboard/ckpts/
     filename: "narrative_weam_bertloss-{epoch:02d}"
   # EarlyStopping:

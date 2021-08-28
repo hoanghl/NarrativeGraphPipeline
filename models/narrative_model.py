@@ -9,7 +9,6 @@ from transformers import (
     AdamW,
     BertTokenizer,
     get_cosine_with_hard_restarts_schedule_with_warmup,
-    get_linear_schedule_with_warmup,
 )
 from utils.model_utils import get_scores
 
@@ -27,12 +26,13 @@ class NarrativeModel(plt.LightningModule):
         d_bert,
         d_vocab,
         lr,
+        w_decay,
         dropout,
         size_dataset_train,
         max_epochs,
         warmup_rate,
         path_pretrained,
-        path_pred,
+        path_saved_bert,
         path_train_pred,
         path_valid_pred,
     ):
@@ -46,7 +46,7 @@ class NarrativeModel(plt.LightningModule):
         self.size_dataset_train = size_dataset_train
         self.max_epochs = max_epochs
         self.warmup_rate = warmup_rate
-        self.path_pred = path_pred
+        self.w_decay = w_decay
         self.path_train_pred = path_train_pred
         self.path_valid_pred = path_valid_pred
         self.bert_tokenizer = BertTokenizer.from_pretrained(path_pretrained)
@@ -63,9 +63,9 @@ class NarrativeModel(plt.LightningModule):
             d_bert=d_bert,
             n_heads=n_heads,
             d_vocab=d_vocab,
-            dropout=dropout,
-            criterion=torch_nn.CrossEntropyLoss(ignore_index=self.bert_tokenizer.pad_token_id),
+            path_saved_bert=path_saved_bert,
             path_pretrained=path_pretrained,
+            criterion=torch_nn.CrossEntropyLoss(ignore_index=self.bert_tokenizer.pad_token_id),
             device=self.device,
         )
 
@@ -189,7 +189,7 @@ class NarrativeModel(plt.LightningModule):
         optimizer_grouped_parameters = [
             {
                 "params": params_decay,
-                "weight_decay": 0.95,
+                "weight_decay": self.w_decay,
             },
             {
                 "params": params_nodecay,

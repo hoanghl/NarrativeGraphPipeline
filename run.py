@@ -1,12 +1,12 @@
-from typing import List
-import sys
 import os
+import sys
+from typing import List
 
+import dotenv
 import hydra
 from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning import Callback, LightningDataModule, LightningModule, Trainer
 from pytorch_lightning.loggers import LightningLoggerBase
-import dotenv
 
 import utils.run_utils as utils
 
@@ -43,9 +43,7 @@ def main(config: DictConfig):
 
     # Init lightning model
     log.info(f"Instantiating model <{config.model._target_}>")
-    model_kwargs = {"datamodule": datamodule}
-    model: LightningModule = hydra.utils.instantiate(config.model, **model_kwargs)
-
+    model: LightningModule = hydra.utils.instantiate(config.model)
     # Init lightning callbacks
     callbacks: List[Callback] = []
     if "callbacks" in config and config.callbacks is not None:
