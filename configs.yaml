@@ -49,7 +49,7 @@ trainer:
   _target_: pytorch_lightning.Trainer
   gpus: 1
   min_epochs: 1
-  max_epochs: 30
+  max_epochs: 60
   # precision: 16
   auto_lr_find: False
   terminate_on_nan: True
@@ -75,9 +75,9 @@ model:
   n_edges: 60
   n_propagations: 2
   lr: 1e-5
-  w_decay: 0.95
-  dropout: 0.15
-  warmup_rate: 0.2
+  w_decay: 0.9
+  dropout: 0.2
+  warmup_rate: 0.25
   size_dataset_train: ${sizes_dataset.train}
   max_epochs: ${trainer.max_epochs}
   path_pretrained: ${PATH.pretrained}
@@ -99,7 +99,7 @@ callbacks:
     monitor: "valid/bleu_1"
     save_top_k: 2
     save_last: True
-    mode: "min"
+    mode: "max"
     dirpath: "chkpts/"
     filename: "narrative_graph-{epoch:02d}"
   LearningRateMonitor:

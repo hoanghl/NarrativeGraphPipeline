@@ -3,7 +3,12 @@ import json
 import pytorch_lightning as plt
 import torch
 import torch.nn as torch_nn
-from transformers import AdamW, BertTokenizer, get_linear_schedule_with_warmup
+from transformers import (
+    AdamW,
+    BertTokenizer,
+    get_cosine_with_hard_restarts_schedule_with_warmup,
+    get_linear_schedule_with_warmup,
+)
 
 from models.layers.chime import CHIME
 from utils.model_utils import get_scores
@@ -167,10 +172,11 @@ class NarrativeModel(plt.LightningModule):
         optimizer = AdamW(params=optimizer_grouped_parameters, lr=self.lr)
 
         lr_scheduler = {
-            "scheduler": get_linear_schedule_with_warmup(
+            "scheduler": get_cosine_with_hard_restarts_schedule_with_warmup(
                 optimizer,
                 num_warmup_steps=int(self.n_training_steps * self.warmup_rate),
                 num_training_steps=self.n_training_steps,
+                num_cycles=6,
             ),
             "name": "learning_rate",
             "interval": "step",
