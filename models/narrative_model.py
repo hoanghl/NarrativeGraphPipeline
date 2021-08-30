@@ -5,15 +5,10 @@ from typing import Any, Optional
 import pytorch_lightning as plt
 import torch
 import torch.nn as torch_nn
-from transformers import (
-    AdamW,
-    BertTokenizer,
-    get_cosine_with_hard_restarts_schedule_with_warmup,
-    get_linear_schedule_with_warmup,
-)
+from transformers import AdamW, BertTokenizer, get_linear_schedule_with_warmup
 from utils.model_utils import get_scores
 
-from models.layers.chime import CHIME
+from models.Backbone import Backbone
 
 
 class NarrativeModel(plt.LightningModule):
@@ -23,9 +18,13 @@ class NarrativeModel(plt.LightningModule):
         lq,
         lc,
         la,
-        n_heads,
         d_bert,
         d_vocab,
+        num_heads,
+        num_heads_persistent,
+        num_layers_p,
+        num_layers_q,
+        num_layers_a,
         lr,
         dropout,
         size_dataset_train,
@@ -57,15 +56,19 @@ class NarrativeModel(plt.LightningModule):
         # Define model
         #############################
 
-        self.model = CHIME(
+        self.model = Backbone(
             lq=lq,
             lc=lc,
             d_bert=d_bert,
-            n_heads=n_heads,
             d_vocab=d_vocab,
+            num_heads=num_heads,
+            num_heads_persistent=num_heads_persistent,
+            num_layers_p=num_layers_p,
+            num_layers_q=num_layers_q,
+            num_layers_a=num_layers_a,
             dropout=dropout,
-            criterion=torch_nn.CrossEntropyLoss(ignore_index=self.bert_tokenizer.pad_token_id),
             path_pretrained=path_pretrained,
+            criterion=torch_nn.CrossEntropyLoss(ignore_index=self.bert_tokenizer.pad_token_id),
             device=self.device,
         )
 
@@ -98,7 +101,13 @@ class NarrativeModel(plt.LightningModule):
 
     def training_step(self, batch: Any, batch_idx: int):
         loss, logist = self.model.do_train(
-            batch["q_ids"], batch["c_ids"], batch["a1_ids"], batch["a2_ids"], use_2_ans=False
+            q=batch["q_ids"],
+            c=batch["c_ids"],
+            a1_ids=batch["a1_ids"],
+            a2_ids=batch["a2_ids"],
+            a1_masks=batch["a1_masks"],
+            a2_masks=batch["a2_masks"],
+            use_2_ans=True,
         )
         # logist: list of [b, la, d_vocab]
 
@@ -111,8 +120,8 @@ class NarrativeModel(plt.LightningModule):
         bz = batch["q_ids"].size(0)
         preds = [
             {
-                "pred": [logit[i].tolist() for logit in logist],
-                "trg": [trg[i].tolist() for trg in trgs],
+                "pred": [logit[i].cpu().detach().numpy() for logit in logist],
+                "trg": [trg[i].cpu().detach().numpy() for trg in trgs],
             }
             for i in range(bz)
         ]
@@ -147,8 +156,8 @@ class NarrativeModel(plt.LightningModule):
         bz = batch["q_ids"].size(0)
         preds = [
             {
-                "pred": [logit[i].tolist() for logit in logist],
-                "trg": [trg[i].tolist() for trg in trgs],
+                "pred": [logit[i].cpu().detach().numpy() for logit in logist],
+                "trg": [trg[i].cpu().detach().numpy() for trg in trgs],
             }
             for i in range(bz)
         ]
@@ -194,11 +203,10 @@ class NarrativeModel(plt.LightningModule):
 
         n_training_steps = self.size_dataset_train // self.batch_size * self.max_epochs
         lr_scheduler = {
-            "scheduler": get_cosine_with_hard_restarts_schedule_with_warmup(
+            "scheduler": get_linear_schedule_with_warmup(
                 optimizer,
                 num_warmup_steps=int(n_training_steps * self.warmup_rate),
                 num_training_steps=n_training_steps,
-                num_cycles=6,
             ),
             "name": "learning_rate",
             "interval": "step",

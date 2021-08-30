@@ -1,27 +1,18 @@
-from torch.utils.data import DataLoader
 import pytorch_lightning as plt
-
+from torch.utils.data import DataLoader
 from utils.datamodule_utils import CustomSampler
+
 from datamodules.dataset import NarrativeDataset
 
 
 class NarrativeDataModule(plt.LightningDataModule):
-    def __init__(
-        self,
-        batch_size,
-        sizes_dataset,
-        lc,
-        n_c,
-        n_shards,
-        path_data,
-        **kwargs,
-    ):
+    def __init__(self, batch_size, sizes_dataset, lc, nc, n_shards, path_data):
 
         super().__init__()
 
         self.batch_size = batch_size
         self.lc = lc
-        self.n_c = n_c
+        self.nc = nc
         self.path_data = path_data
         self.n_shards = n_shards
         self.sizes_dataset = sizes_dataset
@@ -35,7 +26,7 @@ class NarrativeDataModule(plt.LightningDataModule):
         dataset_args = {
             "path_data": self.path_data,
             "lc": self.lc,
-            "n_c": self.n_c,
+            "nc": self.nc,
             "n_shards": self.n_shards,
         }
         if stage == "fit":

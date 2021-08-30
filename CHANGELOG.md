@@ -2,6 +2,14 @@
 
 ### This file contains changes and modifications during developing.
 
+## Aug 30, 16:09
+
+- Add some reasoning modules based on **Masque**
+- Fix mistake in module **dataset**
+- Temporarily turn of module **PersistentMemory**
+- Reorganize code structure in **models**
+- Fix some problems in module **narrative_model**
+
 ## Aug 27, 16:19
 
 - Remove old backbone and replace by **CHIME**'s backbone

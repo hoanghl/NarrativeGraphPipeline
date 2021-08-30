@@ -34,10 +34,10 @@ n_shards: 4
 ##########################################
 ###### CONFIGURATIONS FOR EACH COMPONENT
 ##########################################
-lq: 35
-lc: 180
-la: 12
-n_c: 10
+lq: 33
+lc: 178
+la: 10
+nc: 10
 
 sizes_dataset:
   train: 32747
@@ -68,7 +68,11 @@ model:
   lq: ${lq}
   lc: ${lc}
   la: ${la}
-  n_heads: 4
+  num_heads: 4
+  num_heads_persistent: 4
+  num_layers_q: 2
+  num_layers_p: 4
+  num_layers_a: 5
   d_bert: 768
   d_vocab: 30522
   lr: 1e-5
@@ -86,17 +90,17 @@ datamodule:
   batch_size: ${batch_size}
   sizes_dataset: ${sizes_dataset}
   lc: ${lc}
-  n_c: ${n_c}
+  nc: ${nc}
   n_shards: ${n_shards}
   path_data: ${PATH.data}
 
 callbacks:
   ModelCheckpoint:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
-    monitor: "valid/loss"
+    monitor: "valid/bleu_1"
     save_top_k: 2
     save_last: True
-    mode: "min"
+    mode: "max"
     dirpath: ckpts/
     filename: "narrative_weam-{epoch:02d}"
   LearningRateMonitor:

@@ -200,11 +200,12 @@ class MultiHeadAttention(nn.Module):
 
 
 class EncoderLayer(nn.Module):
-    def __init__(self, model_dim, num_heads, ffn_dim=2048, dropout=0.1):
+    def __init__(self, model_dim, num_heads, ffn_dim=2048, dropout=0.1, no_pos_embd=False):
         super(EncoderLayer, self).__init__()
 
         self.attention = MultiHeadAttention(num_heads, model_dim, dropout)
-        self.feed_forward = PositionalWiseFeedForward(model_dim, ffn_dim, dropout)
+        if not no_pos_embd:
+            self.feed_forward = PositionalWiseFeedForward(model_dim, ffn_dim, dropout)
 
     def forward(self, q, k, v, attn_mask=None):
 
@@ -212,17 +213,22 @@ class EncoderLayer(nn.Module):
         context, attention = self.attention(q, k, v, attn_mask=attn_mask)
 
         # feed forward network
-        output = self.feed_forward(context)
+        output = self.feed_forward(context) if hasattr(self, "feed_forward") else context
 
         return output, attention
 
 
 class TransEncoder(nn.Module):
-    def __init__(self, num_layers, model_dim, num_heads, ffn_dim=2048, dropout=0.1):
+    def __init__(
+        self, num_layers, model_dim, num_heads, no_pos_embd=False, ffn_dim=2048, dropout=0.1
+    ):
         super(TransEncoder, self).__init__()
 
         self.encoder_layers = nn.ModuleList(
-            [EncoderLayer(model_dim, num_heads, ffn_dim, dropout) for _ in range(num_layers)]
+            [
+                EncoderLayer(model_dim, num_heads, ffn_dim, dropout, no_pos_embd)
+                for _ in range(num_layers)
+            ]
         )
 
     def forward(self, q, k, v, attn_mask=None):

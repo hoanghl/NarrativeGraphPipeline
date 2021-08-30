@@ -8,18 +8,10 @@ from torch.utils.data import Dataset
 
 
 class NarrativeDataset(Dataset):
-    def __init__(
-        self,
-        split,
-        path_data,
-        size_dataset,
-        n_c,
-        lc,
-        n_shards,
-    ):
+    def __init__(self, split, path_data, size_dataset, nc, lc, n_shards):
 
         self.split = split
-        self.n_c = n_c
+        self.nc = nc
         self.lc = lc
         self.n_shards = n_shards
         self.size_dataset = size_dataset
@@ -30,14 +22,13 @@ class NarrativeDataset(Dataset):
         self.curent_ith_file = -1
 
         self.q_ids = None
-        self.q_masks = None
         self.a1_ids = None
         self.a1_masks = None
         self.a2_ids = None
+        self.a2_masks = None
         self.c_ids = None
-        self.c_masks = None
 
-        self.exchange_rate = 0.5
+        self.exchange_rate = 0.75
 
     def __len__(self) -> int:
         return self.size_dataset
@@ -64,16 +55,15 @@ class NarrativeDataset(Dataset):
 
         return {
             "q_ids": self.q_ids[indx],
-            "q_masks": self.q_masks[indx],
             "a1_ids": self.a1_ids[indx],
             "a2_ids": self.a2_ids[indx],
             "a1_masks": self.a1_masks[indx],
+            "a2_masks": self.a2_masks[indx],
             "c_ids": self.c_ids[indx],
-            "c_masks": self.c_masks[indx],
         }
 
     def _get_context(self, En, Hn):
-        n_samples = min((len(En), self.n_c))
+        n_samples = min((len(En), self.nc))
         if self.split == "train":
             selects_Hn = int(n_samples * self.exchange_rate)
             selects_En = n_samples - selects_Hn
@@ -83,53 +73,57 @@ class NarrativeDataset(Dataset):
         return sample(Hn, n_samples)
 
     def read_datasetfile(self, path_file):
+        def get_masks(ids):
+            masks = np.zeros(ids.shape)
+            masks[: ids[ids != 0].shape[0]] = 1
+
+            return masks
+
         df = pd.read_parquet(path_file)
 
         self.q_ids = []
-        self.q_masks = []
         self.a1_ids = []
         self.a1_masks = []
         self.a2_ids = []
+        self.a2_masks = []
         self.c_ids = []
-        self.c_masks = []
 
         for entry in df.itertuples():
-            self.q_ids.append(np.copy(entry.q_ids))
-            self.q_masks.append(np.copy(entry.q_masks))
-            self.a1_ids.append(np.copy(entry.a1_ids))
-            self.a1_masks.append(np.copy(entry.a1_masks))
-            self.a2_ids.append(np.copy(entry.a2_ids))
+            q = entry.q_ids[(entry.q_ids != 101) & (entry.q_ids != 102)]
+            a1 = entry.a1_ids[(entry.a1_ids != 101) & (entry.a1_ids != 102)]
+            a2 = entry.a1_ids[(entry.a1_ids != 101) & (entry.a1_ids != 102)]
+            a1_mask = entry.a1_masks[(entry.a1_masks != 101) & (entry.a1_masks != 102)]
+            a2_mask = get_masks(entry.a2_ids)
+            a2_mask = a2_mask[(a2_mask != 101) & (a2_mask != 102)]
+            cE = entry.c_E_ids[(entry.c_E_ids != 101) & (entry.c_E_ids != 102)]
+            cE = np.reshape(cE, (-1, self.lc))
+            cH = entry.c_H_ids[(entry.c_H_ids != 101) & (entry.c_H_ids != 102)]
+            cH = np.reshape(cH, (-1, self.lc))
 
-            c_E_ids = np.copy(np.reshape(entry.c_E_ids, (-1, self.lc)))
-            c_E_masks = np.copy(np.reshape(entry.c_E_masks, (-1, self.lc)))
-            c_H_ids = np.copy(np.reshape(entry.c_H_ids, (-1, self.lc)))
-            c_H_masks = np.copy(np.reshape(entry.c_H_masks, (-1, self.lc)))
+            self.q_ids.append(np.copy(q))
+            self.a1_ids.append(np.copy(a1))
+            self.a2_ids.append(np.copy(a2))
+            self.a1_masks.append(np.copy(a1_mask))
+            self.a2_masks.append(np.copy(a2_mask))
 
-            c_ids = np.zeros((self.n_c, self.lc), dtype=int)
-            c_masks = np.zeros((self.n_c, self.lc), dtype=int)
-
-            n_samples = c_E_ids.shape[0]
+            c = np.zeros((self.nc, self.lc), dtype=int)
+            n_samples = cE.shape[0]
             if self.split == "train":
 
                 ratio_Hn = int(n_samples * self.exchange_rate)
                 indices_Hn = sample(range(n_samples), ratio_Hn)
-                c_H_ids = c_H_ids[indices_Hn]
-                c_H_masks = c_H_masks[indices_Hn]
+                cH = cH[indices_Hn]
 
                 ratio_En = n_samples - ratio_Hn
                 indices_En = sample(range(n_samples), ratio_En)
-                c_E_ids = c_E_ids[indices_En]
-                c_E_masks = c_E_masks[indices_En]
+                cE = cE[indices_En]
 
-                c_ids[:n_samples] = np.concatenate((c_E_ids, c_H_ids), axis=0)
-                c_masks[:n_samples] = np.concatenate((c_E_masks, c_H_masks), axis=0)
+                c[:n_samples] = np.concatenate((cE, cH), axis=0)
 
             else:
-                c_ids[:n_samples] = c_H_ids
-                c_masks[:n_samples] = c_H_masks
+                c[:n_samples] = cH
 
-            self.c_ids.append(c_ids)
-            self.c_masks.append(c_masks)
+            self.c_ids.append(c)
 
     # def switch_answerability(self):
     #     self.exchange_rate = min((1, self.exchange_rate + 0.25))
