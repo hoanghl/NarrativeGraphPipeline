@@ -22,6 +22,7 @@ class Backbone(torch_nn.Module):
         lq,
         lc,
         d_bert,
+        d_hid,
         d_vocab,
         dropout,
         num_heads,
@@ -42,19 +43,22 @@ class Backbone(torch_nn.Module):
         self.pad_id = tokenizer.pad_token_id
         self.sep_id = tokenizer.sep_token_id
 
-        self.embedding = Embedding(lq, lc, d_bert, num_heads_persistent, path_pretrained, device)
-        self.dual_attn = DualAttention(d_bert)
-        self.model_enc = ModelingEncoder(num_layers_p, num_layers_q, num_heads, d_bert, dropout)
+        
+
+        self.lin = torch_nn.Linear(d_bert, d_hid)
+        self.embedding = Embedding(lq, lc, d_hid, num_heads_persistent, path_pretrained, device)
+        self.dual_attn = DualAttention(d_hid)
+        self.model_enc = ModelingEncoder(num_layers_p, num_layers_q, num_heads, d_hid, dropout)
         self.ans_enc = AnsEncoder(
-            d_bert, num_layers=num_layers_a, num_heads=num_heads, dropout=dropout
+            d_hid, num_layers=num_layers_a, num_heads=num_heads, dropout=dropout
         )
-        self.shortterm_mem = ShortTermMemoryCell(d_bert, dropout)
-        self.decoder = torch_nn.Linear(d_bert, d_vocab)
+        self.shortterm_mem = ShortTermMemoryCell(d_hid, dropout)
+        self.decoder = torch_nn.Linear(d_hid, d_vocab)
 
         self.criterion = criterion
 
         ## Init
-        self.decoder.weight = self.embedding.encoder.embeddings.word_embeddings.weight
+        # self.decoder.weight = self.embedding.encoder.embeddings.word_embeddings.weight
         self.decoder.bias.data.zero_()
 
     # np: no pad token
@@ -116,6 +120,8 @@ class Backbone(torch_nn.Module):
             ## Encode q, c and a using Bert
             q, ci, a, trgs = self.embedding(q_ids, c_ids[:, i], a_ids, a_ids.size(-1))
             # [b, l_, d_bert]
+
+            q, ci, a = self.lin(q), self.lin(ci), self.lin(a)
 
             ## Use Dual Attention
             G_pq, G_qp = self.dual_attn(q, ci)
