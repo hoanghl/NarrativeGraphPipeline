@@ -8,50 +8,29 @@ from torch.utils.data import Dataset
 
 
 class NarrativeDataset(Dataset):
-    def __init__(self, split, path_data, size_dataset, nc, lc, n_shards):
+    def __init__(self, split, path_data, nc, lc):
 
         self.split = split
         self.nc = nc
         self.lc = lc
-        self.n_shards = n_shards
-        self.size_dataset = size_dataset
 
-        path_data = path_data.replace("[SPLIT]", split).replace("[SHARD]", "*")
-        self.paths = sorted(glob.glob(path_data))
-
-        self.curent_ith_file = -1
-
-        self.q_ids = None
-        self.a1_ids = None
-        self.a1_masks = None
-        self.a2_ids = None
-        self.a2_masks = None
-        self.c_ids = None
+        self.q_ids = []
+        self.a1_ids = []
+        self.a1_masks = []
+        self.a2_ids = []
+        self.a2_masks = []
+        self.c_ids = []
 
         self.exchange_rate = 0.75
 
+        self.read_datasetfile(path_data, split)
+
     def __len__(self) -> int:
-        return self.size_dataset
+        return len(self.q_ids)
 
     def __getitem__(self, indx):
         if torch.is_tensor(indx):
             indx = indx.tolist()
-
-        size_shard = self.size_dataset // self.n_shards
-
-        ith_file = indx // size_shard
-        indx = indx % size_shard
-
-        if ith_file == self.n_shards:
-            ith_file -= 1
-            indx = indx + size_shard
-
-        # Check nth file and reload dataset if needed
-        if ith_file != self.curent_ith_file:
-            self.curent_ith_file = ith_file
-
-            # Reload dataset
-            self.read_datasetfile(self.paths[self.curent_ith_file])
 
         return {
             "q_ids": self.q_ids[indx],
@@ -62,31 +41,14 @@ class NarrativeDataset(Dataset):
             "c_ids": self.c_ids[indx],
         }
 
-    def _get_context(self, En, Hn):
-        n_samples = min((len(En), self.nc))
-        if self.split == "train":
-            selects_Hn = int(n_samples * self.exchange_rate)
-            selects_En = n_samples - selects_Hn
-
-            return sample(En, selects_En) + sample(Hn, selects_Hn)
-
-        return sample(Hn, n_samples)
-
-    def read_datasetfile(self, path_file):
+    def read_datasetfile(self, path_data, split):
         def get_masks(ids):
             masks = np.zeros(ids.shape)
             masks[: ids[ids != 0].shape[0]] = 1
 
             return masks
 
-        df = pd.read_parquet(path_file)
-
-        self.q_ids = []
-        self.a1_ids = []
-        self.a1_masks = []
-        self.a2_ids = []
-        self.a2_masks = []
-        self.c_ids = []
+        df = pd.read_parquet(path_data.replace("[SPLIT]", split))
 
         for entry in df.itertuples():
             q = entry.q_ids[(entry.q_ids != 101) & (entry.q_ids != 102)]

@@ -111,7 +111,15 @@ class NarrativeModel(plt.LightningModule):
         )
         # logist: list of [b, la, d_vocab]
 
-        self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=False)
+        if self.trainer.is_global_zero:
+            self.log(
+                "train/loss",
+                loss,
+                on_step=True,
+                on_epoch=True,
+                prog_bar=False,
+                rank_zero_only=True,
+            )
         # logist: list of [b, la, d_vocab]
 
         logist = [torch.argmax(logist_, dim=1) for logist_ in logist]
@@ -138,10 +146,35 @@ class NarrativeModel(plt.LightningModule):
 
         bleu_1, bleu_4, meteor, rouge_l = get_scores(preds)
 
-        self.log("train/bleu_1", bleu_1, on_epoch=True, prog_bar=False)
-        self.log("train/bleu_4", bleu_4, on_epoch=True, prog_bar=False)
-        self.log("train/meteor", meteor, on_epoch=True, prog_bar=False)
-        self.log("train/rouge_l", rouge_l, on_epoch=True, prog_bar=False)
+        if self.trainer.is_global_zero:
+            self.log(
+                "train/bleu_1",
+                bleu_1,
+                on_epoch=True,
+                prog_bar=False,
+                rank_zero_only=True,
+            )
+            self.log(
+                "train/bleu_4",
+                bleu_4,
+                on_epoch=True,
+                prog_bar=False,
+                rank_zero_only=True,
+            )
+            self.log(
+                "train/meteor",
+                meteor,
+                on_epoch=True,
+                prog_bar=False,
+                rank_zero_only=True,
+            )
+            self.log(
+                "train/rouge_l",
+                rouge_l,
+                on_epoch=True,
+                prog_bar=False,
+                rank_zero_only=True,
+            )
 
     def test_step(self, batch: Any, batch_idx):
         return 0
@@ -174,10 +207,35 @@ class NarrativeModel(plt.LightningModule):
 
         bleu_1, bleu_4, meteor, rouge_l = get_scores(preds)
 
-        self.log("valid/bleu_1", bleu_1, on_epoch=True, prog_bar=False)
-        self.log("valid/bleu_4", bleu_4, on_epoch=True, prog_bar=False)
-        self.log("valid/meteor", meteor, on_epoch=True, prog_bar=False)
-        self.log("valid/rouge_l", rouge_l, on_epoch=True, prog_bar=False)
+        if self.trainer.is_global_zero:
+            self.log(
+                "valid/bleu_1",
+                bleu_1,
+                on_epoch=True,
+                prog_bar=False,
+                rank_zero_only=True,
+            )
+            self.log(
+                "valid/bleu_4",
+                bleu_4,
+                on_epoch=True,
+                prog_bar=False,
+                rank_zero_only=True,
+            )
+            self.log(
+                "valid/meteor",
+                meteor,
+                on_epoch=True,
+                prog_bar=False,
+                rank_zero_only=True,
+            )
+            self.log(
+                "valid/rouge_l",
+                rouge_l,
+                on_epoch=True,
+                prog_bar=False,
+                rank_zero_only=True,
+            )
 
     def configure_optimizers(self):
         no_decay = ["bias", "LayerNorm.weight"]

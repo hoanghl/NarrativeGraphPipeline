@@ -2,6 +2,12 @@
 
 ### This file contains changes and modifications during developing.
 
+## Aug 31, 21:47
+
+- Discard **file shard** method
+- Add multi GPU support
+- Refactor some code
+
 ## Aug 30, 16:09
 
 - Add some reasoning modules based on **Masque**
