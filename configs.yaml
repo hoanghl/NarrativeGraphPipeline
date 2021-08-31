@@ -22,7 +22,7 @@ defaults:
 PATH:
   utils: ""
   raw: ${PATH.utils}/raw
-  data: ${PATH.utils}/processed/story/[SPLIT]/data_[SHARD].parquet
+  data: ${PATH.utils}/processed/story/[SPLIT].parquet
   pretrained: ${PATH.utils}/bert-base-uncased
   train_pred: ${work_dir}/logs/train_pred.json
   valid_pred: ${work_dir}/logs/valid_pred.json
@@ -34,12 +34,11 @@ mode: train
 
 batch_size: 5
 n_workers: 8
-n_shards: 4
 
-lq: 33
+lq: 35
 nc: 10
-lc: 178
-la: 10
+lc: 180
+la: 12
 sizes_dataset:
   train: 32747
   test: 10557
@@ -65,16 +64,20 @@ trainer:
 model:
   _target_: models.narrative_model.NarrativeModel
   batch_size: ${batch_size}
-  lq: ${lq}
   lc: ${lc}
   la: ${la}
+  nc: ${nc}
   d_bert: 768
+  d_hid: 128
   d_vocab: 30522
+  num_layers_lstm: 5
+  block: 200
   lr: 1e-5
   w_decay: 1e-2
+  dropout: 0.15
   warmup_rate: 0.2
-  size_dataset_train: ${sizes_dataset.train}
   max_epochs: ${trainer.max_epochs}
+  size_dataset_train: ${sizes_dataset.train}
   path_pretrained: ${PATH.pretrained}
   path_train_pred: ${PATH.train_pred}
   path_valid_pred: ${PATH.valid_pred}
@@ -82,10 +85,8 @@ model:
 datamodule:
   _target_: datamodules.narrative_datamodule.NarrativeDataModule
   batch_size: ${batch_size}
-  sizes_dataset: ${sizes_dataset}
   lc: ${lc}
   nc: ${nc}
-  n_shards: ${n_shards}
   path_data: ${PATH.data}
 
 callbacks:

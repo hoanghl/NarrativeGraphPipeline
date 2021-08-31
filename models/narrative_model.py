@@ -6,22 +6,26 @@ import torch.nn as torch_nn
 from transformers import AdamW, BertTokenizer, get_linear_schedule_with_warmup
 from utils.model_utils import get_scores
 
-from models.chime import CHIME
+from models.Backbone import Backbone
 
 
 class NarrativeModel(plt.LightningModule):
     def __init__(
         self,
         batch_size,
-        lq,
         lc,
         la,
+        nc,
         d_bert,
+        d_hid,
         d_vocab,
+        num_layers_lstm,
+        block,
         lr,
         w_decay,
-        max_epochs,
+        dropout,
         warmup_rate,
+        max_epochs,
         size_dataset_train,
         path_pretrained,
         path_valid_pred,
@@ -41,13 +45,20 @@ class NarrativeModel(plt.LightningModule):
         #############################
         # Define model
         #############################
-        self.model = CHIME(
-            lq=lq,
+        self.model = Backbone(
+            batch_size=batch_size,
+            la=la,
             lc=lc,
+            nc=nc,
             d_bert=d_bert,
+            d_hid=d_hid,
             d_vocab=d_vocab,
+            num_layers_lstm=num_layers_lstm,
+            block=block,
+            dropout=dropout,
             path_pretrained=path_pretrained,
             criterion=torch_nn.CrossEntropyLoss(ignore_index=self.bert_tokenizer.pad_token_id),
+            device=self.device,
         )
 
     ####################################################################
@@ -69,9 +80,7 @@ class NarrativeModel(plt.LightningModule):
         return pairs
 
     def training_step(self, batch, batch_idx: int):
-        loss, logist = self.model.do_train(
-            batch["q_ids"], batch["c_ids"], batch["a1_ids"], batch["a2_ids"], use_2_ans=False
-        )
+        loss, logist = self.model.do_train(**batch)
         # logist: list of [b, la, d_vocab]
 
         self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=False)
@@ -83,8 +92,8 @@ class NarrativeModel(plt.LightningModule):
         bz = batch["q_ids"].size(0)
         preds = [
             {
-                "pred": [logit[i].tolist() for logit in logist],
-                "trg": [trg[i].tolist() for trg in trgs],
+                "pred": [logit[i].cpu().detach().numpy() for logit in logist],
+                "trg": [trg[i].cpu().detach().numpy() for trg in trgs],
             }
             for i in range(bz)
         ]
@@ -107,20 +116,22 @@ class NarrativeModel(plt.LightningModule):
         self.log("train/rouge_l", rouge_l, on_epoch=True, prog_bar=False)
 
     def test_step(self, batch, batch_idx):
-        return None
+        return 0
 
     def validation_step(self, batch, batch_idx):
-        logist = self.model.do_predict(batch["q_ids"], batch["c_ids"], self.la)
+        loss, output = self.model.do_predict(**batch)
         # logist: [b, la]
 
-        logist = [logist, logist]
+        self.log("valid/loss", loss, on_step=False, on_epoch=True, prog_bar=False)
+
+        outputs = [output, output]
         trgs = [batch["a1_ids"], batch["a2_ids"]]
 
         bz = batch["q_ids"].size(0)
         preds = [
             {
-                "pred": [logit[i].tolist() for logit in logist],
-                "trg": [trg[i].tolist() for trg in trgs],
+                "pred": [output[i].cpu().detach().numpy() for output in outputs],
+                "trg": [trg[i].cpu().detach().numpy() for trg in trgs],
             }
             for i in range(bz)
         ]

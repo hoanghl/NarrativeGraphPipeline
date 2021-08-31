@@ -1,12 +1,11 @@
 import pytorch_lightning as plt
 from torch.utils.data import DataLoader
-from utils.datamodule_utils import CustomSampler
 
 from datamodules.dataset import NarrativeDataset
 
 
 class NarrativeDataModule(plt.LightningDataModule):
-    def __init__(self, batch_size, sizes_dataset, lc, nc, n_shards, path_data):
+    def __init__(self, batch_size, lc, nc, path_data):
 
         super().__init__()
 
@@ -14,8 +13,6 @@ class NarrativeDataModule(plt.LightningDataModule):
         self.lc = lc
         self.nc = nc
         self.path_data = path_data
-        self.n_shards = n_shards
-        self.sizes_dataset = sizes_dataset
 
         self.data_train = None
         self.data_test = None
@@ -27,36 +24,21 @@ class NarrativeDataModule(plt.LightningDataModule):
             "path_data": self.path_data,
             "lc": self.lc,
             "nc": self.nc,
-            "n_shards": self.n_shards,
         }
         if stage == "fit":
-            self.data_train = NarrativeDataset(
-                "train", size_dataset=self.sizes_dataset["train"], **dataset_args
-            )
-            self.data_valid = NarrativeDataset(
-                "valid", size_dataset=self.sizes_dataset["valid"], **dataset_args
-            )
+            self.data_train = NarrativeDataset("train", **dataset_args)
+            self.data_valid = NarrativeDataset("valid", **dataset_args)
         else:
-            self.data_test = NarrativeDataset(
-                "test", size_dataset=self.sizes_dataset["test"], **dataset_args
-            )
+            self.data_test = NarrativeDataset("test", **dataset_args)
 
     def train_dataloader(self):
         """Return DataLoader for training."""
-        return DataLoader(
-            dataset=self.data_train,
-            batch_size=self.batch_size,
-            sampler=CustomSampler(self.sizes_dataset["train"], n_shards=self.n_shards),
-        )
+        return DataLoader(dataset=self.data_train, batch_size=self.batch_size)
 
     def val_dataloader(self):
         """Return DataLoader for validation."""
 
-        return DataLoader(
-            dataset=self.data_valid,
-            batch_size=self.batch_size,
-            sampler=CustomSampler(self.sizes_dataset["valid"], n_shards=self.n_shards),
-        )
+        return DataLoader(dataset=self.data_valid, batch_size=self.batch_size)
 
     def predict_dataloader(self):
         """Return DataLoader for prediction."""
@@ -64,7 +46,6 @@ class NarrativeDataModule(plt.LightningDataModule):
         return DataLoader(
             dataset=self.data_test,
             batch_size=self.batch_size,
-            sampler=CustomSampler(self.sizes_dataset["test"], n_shards=self.n_shards),
         )
 
     # def switch_answerability(self):

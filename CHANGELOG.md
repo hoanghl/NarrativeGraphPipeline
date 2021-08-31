@@ -2,6 +2,11 @@
 
 ### This file contains changes and modifications during developing.
 
+## Aug 31, 17:49
+
+- Reimplement model **Yi Tay**
+- Discard **file shard** method
+
 ## Aug 27, 19:03
 
 - Move loss to model
