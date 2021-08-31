@@ -47,7 +47,7 @@ sizes_dataset:
 trainer:
   _target_: pytorch_lightning.Trainer
   gpus: 1
-  precision: 32
+  precision: 16
   accelerator: null
   replace_sampler_ddp: False
   min_epochs: 1
@@ -75,6 +75,7 @@ model:
   num_layers_p: 4
   num_layers_a: 5
   d_bert: 768
+  d_hid: 256
   d_vocab: 30522
   lr: 1e-5
   dropout: 0.2

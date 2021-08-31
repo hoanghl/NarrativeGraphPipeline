@@ -19,6 +19,7 @@ class NarrativeModel(plt.LightningModule):
         lc,
         la,
         d_bert,
+        d_hid,
         d_vocab,
         num_heads,
         num_heads_persistent,
@@ -60,6 +61,7 @@ class NarrativeModel(plt.LightningModule):
             lq=lq,
             lc=lc,
             d_bert=d_bert,
+            d_hid=d_hid,
             d_vocab=d_vocab,
             num_heads=num_heads,
             num_heads_persistent=num_heads_persistent,
@@ -103,10 +105,10 @@ class NarrativeModel(plt.LightningModule):
         loss, logist = self.model.do_train(
             q=batch["q_ids"],
             c=batch["c_ids"],
-            a1_ids=batch["a1_ids"],
-            a2_ids=batch["a2_ids"],
-            a1_masks=batch["a1_masks"],
-            a2_masks=batch["a2_masks"],
+            a1=batch["a1_ids"],
+            a2=batch["a2_ids"],
+            a1_mask=batch["a1_masks"],
+            a2_mask=batch["a2_masks"],
             use_2_ans=True,
         )
         # logist: list of [b, la, d_vocab]
