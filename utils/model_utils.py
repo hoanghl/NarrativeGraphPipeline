@@ -62,28 +62,19 @@ def get_scores(outputs, eps=10e-8):
     n_samples = 0
     bleu_1, bleu_4, meteor, rouge_l = 0, 0, 0, 0
     for pair in outputs:
-        preds = list(map(process_sent, pair["pred"]))
-        refs = list(map(process_sent, pair["trg"]))
+        pred = process_sent(pair["pred"])
+        ref = process_sent(pair["trg"])
 
-        bleu_1_, bleu_4_, meteor_, rouge_l_ = 0, 0, 0, 0
-        for pred, ref in zip(preds, refs):
-            if pred == "":
-                continue
+        if pred == "":
+            continue
 
-            try:
-                bleu_1_ += sentence_bleu([ref.split()], pred.split(), weights=(1, 0, 0, 0))
-                bleu_4_ += sentence_bleu(
-                    [ref.split()], pred.split(), weights=(0.25, 0.25, 0.25, 0.25)
-                )
-                meteor_ += meteor_score([ref], pred)
-                rouge_l_ += Rouge().get_scores(ref, pred, avg=True)["rouge-l"]["f"]
-            except ValueError:
-                pass
-
-        bleu_1_ /= len(preds)
-        bleu_4_ /= len(preds)
-        meteor_ /= len(preds)
-        rouge_l_ /= len(preds)
+        try:
+            bleu_1_ = sentence_bleu([ref.split()], pred.split(), weights=(1, 0, 0, 0))
+            bleu_4_ = sentence_bleu([ref.split()], pred.split(), weights=(0.25, 0.25, 0.25, 0.25))
+            meteor_ = meteor_score([ref], pred)
+            rouge_l_ = Rouge().get_scores(ref, pred, avg=True)["rouge-l"]["f"]
+        except ValueError:
+            pass
 
         bleu_1 += bleu_1_ if bleu_1_ > eps else 0
         bleu_4 += bleu_4_ if bleu_4_ > eps else 0

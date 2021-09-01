@@ -151,7 +151,7 @@ class IntrospectiveAlignmentLayer(torch_nn.Module):
         # [bz, l, 4*d_hid]
 
         G = G @ G.transpose(-1, -2)
-        G = G * self.mask[:bz]
+        G = G * self.mask.type_as(G)[:bz]
         # [bz, l, l]
 
         # Local BLock-based Self-Attention
@@ -280,8 +280,8 @@ class PGN(torch_nn.Module):
             pt = F.sigmoid(self.lin_pgn1(c_) + self.lin_pgn2(h_) + self.lin_pgn3(y))
             # [bz, 1]
             wt = (1 - pt) * vt
-            vt = torch.scatter_add(vt, -1, c_ids, at.squeeze(-1))
-            wt = wt + pt * vt
+            at = torch.scatter_add(torch.zeros_like(vt), -1, c_ids, at.squeeze(-1)).softmax(-1)
+            wt = wt + pt * at
             # [bz, d_vocab]
 
             outputs.append(wt.unsqueeze(-1))
@@ -342,9 +342,12 @@ class PGN(torch_nn.Module):
                 # [1, d_vocab]
                 pt = F.sigmoid(self.lin_pgn1(c_) + self.lin_pgn2(h_) + self.lin_pgn3(y))
                 # [1, 1]
+
                 wt = (1 - pt) * vt
-                vt = torch.scatter_add(vt, -1, c_ids, at.squeeze(-1))
-                wt = wt + pt * vt
+                at = torch.scatter_add(torch.zeros_like(vt), -1, c_ids_, at.squeeze(-1)).softmax(
+                    -1
+                )
+                wt = wt + pt * at
                 # [1, d_vocab]
 
                 pred_tok = wt.argmax(-1)
