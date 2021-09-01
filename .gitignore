@@ -143,3 +143,4 @@ tests/
 cmd_for_tessera.sh
 .vector_cache
 *.ipynb
+sbatch.sh

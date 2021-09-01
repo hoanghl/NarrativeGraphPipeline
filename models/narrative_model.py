@@ -84,7 +84,7 @@ class NarrativeModel(plt.LightningModule):
                 "train/loss",
                 loss,
                 on_step=True,
-                on_epoch=True,
+                on_epoch=False,
                 prog_bar=False,
                 rank_zero_only=True,
             )
@@ -104,18 +104,17 @@ class NarrativeModel(plt.LightningModule):
                     }
                 )
 
-        return {"loss": loss, "pred": preds}
+        return {"loss": loss, "prediction": preds}
 
     def training_epoch_end(self, outputs) -> None:
         outputs = self.all_gather(outputs)
 
-        ## Calculate mean loss
-        loss = torch.mean(outputs["loss"])
         if self.trainer.is_global_zero:
-            self.log("valid/loss", loss, rank_zero_only=True)
+            ## Calculate mean loss
+            loss = torch.mean(torch.cat([output["loss"] for output in outputs]))
+            self.log("train/loss", loss, rank_zero_only=True)
 
-        ## Calculate B-1, B-4, METEOR and ROUGE-L
-        if self.trainer.is_global_zero:
+            ## Calculate B-1, B-4, METEOR and ROUGE-L
             output_ = []
             for output in outputs:
                 output_.extend(output["prediction"])
@@ -165,13 +164,12 @@ class NarrativeModel(plt.LightningModule):
     def validation_epoch_end(self, outputs) -> None:
         outputs = self.all_gather(outputs)
 
-        ## Calculate mean loss
-        loss = torch.mean(outputs["loss"])
         if self.trainer.is_global_zero:
+            ## Calculate mean loss
+            loss = torch.mean(torch.cat([output["loss"] for output in outputs]))
             self.log("valid/loss", loss, rank_zero_only=True)
 
-        ## Calculate B-1, B-4, METEOR and ROUGE-L
-        if self.trainer.is_global_zero:
+            ## Calculate B-1, B-4, METEOR and ROUGE-L
             output_ = []
             for output in outputs:
                 output_.extend(output["prediction"])
