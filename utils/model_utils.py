@@ -84,10 +84,10 @@ def get_scores(outputs, eps=10e-8):
         n_samples += 1
 
     return (
-        bleu_1 / n_samples,
-        bleu_4 / n_samples,
-        meteor / n_samples,
-        rouge_l / n_samples,
+        bleu_1 / n_samples if n_samples > 0 else 0,
+        bleu_4 / n_samples if n_samples > 0 else 0,
+        meteor / n_samples if n_samples > 0 else 0,
+        rouge_l / n_samples if n_samples > 0 else 0,
     )
 
 

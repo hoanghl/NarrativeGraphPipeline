@@ -79,15 +79,7 @@ class NarrativeModel(plt.LightningModule):
         loss, logist = self.model.do_train(**batch)
         # logist: list of [b, la, d_vocab]
 
-        if self.trainer.is_global_zero:
-            self.log(
-                "train/loss",
-                loss,
-                on_step=True,
-                on_epoch=False,
-                prog_bar=False,
-                rank_zero_only=True,
-            )
+        self.log("train/loss_step", loss, on_step=True, on_epoch=False, prog_bar=False)
         # logist: list of [b, la, d_vocab]
 
         logist = [torch.argmax(logist_, dim=1) for logist_ in logist]
@@ -112,7 +104,7 @@ class NarrativeModel(plt.LightningModule):
         if self.trainer.is_global_zero:
             ## Calculate mean loss
             loss = torch.mean(torch.cat([output["loss"] for output in outputs]))
-            self.log("train/loss", loss, rank_zero_only=True)
+            self.log("train/loss_epoch", loss, rank_zero_only=True)
 
             ## Calculate B-1, B-4, METEOR and ROUGE-L
             output_ = []
@@ -164,35 +156,35 @@ class NarrativeModel(plt.LightningModule):
     def validation_epoch_end(self, outputs) -> None:
         outputs = self.all_gather(outputs)
 
-        if self.trainer.is_global_zero:
-            ## Calculate mean loss
-            loss = torch.mean(torch.cat([output["loss"] for output in outputs]))
-            self.log("valid/loss", loss, rank_zero_only=True)
+        # if self.trainer.is_global_zero:
+        ## Calculate mean loss
+        loss = torch.mean(torch.cat([output["loss"] for output in outputs]))
+        self.log("valid/loss", loss, sync_dist=True)
 
-            ## Calculate B-1, B-4, METEOR and ROUGE-L
-            output_ = []
-            for output in outputs:
-                output_.extend(output["prediction"])
-            outputs = []
-            for output in output_:
-                if len(output["pred"].size()) == 2:
-                    for b in range(output["pred"].size(0)):
-                        outputs.append({"pred": output["pred"][b], "trg": output["trg"][b]})
-                else:
-                    outputs.append(output)
+        ## Calculate B-1, B-4, METEOR and ROUGE-L
+        output_ = []
+        for output in outputs:
+            output_.extend(output["prediction"])
+        outputs = []
+        for output in output_:
+            if len(output["pred"].size()) == 2:
+                for b in range(output["pred"].size(0)):
+                    outputs.append({"pred": output["pred"][b], "trg": output["trg"][b]})
+            else:
+                outputs.append(output)
 
-            outputs = self.get_prediction(outputs)
+        outputs = self.get_prediction(outputs)
 
-            with open(self.path_valid_pred, "a+") as pred_file:
-                json.dump(outputs, pred_file, indent=2, ensure_ascii=False)
+        with open(self.path_valid_pred, "a+") as pred_file:
+            json.dump(outputs, pred_file, indent=2, ensure_ascii=False)
 
-            bleu_1, bleu_4, meteor, rouge_l = get_scores(outputs)
+        bleu_1, bleu_4, meteor, rouge_l = get_scores(outputs)
 
-            # if self.trainer.is_global_zero:
-            self.log("valid/bleu_1", bleu_1, rank_zero_only=True)
-            self.log("valid/bleu_4", bleu_4, rank_zero_only=True)
-            self.log("valid/meteor", meteor, rank_zero_only=True)
-            self.log("valid/rouge_l", rouge_l, rank_zero_only=True)
+        # if self.trainer.is_global_zero:
+        self.log("valid/bleu_1", bleu_1, sync_dist=True)
+        self.log("valid/bleu_4", bleu_4, sync_dist=True)
+        self.log("valid/meteor", meteor, sync_dist=True)
+        self.log("valid/rouge_l", rouge_l, sync_dist=True)
 
     def configure_optimizers(self):
         no_decay = ["bias", "LayerNorm.weight"]

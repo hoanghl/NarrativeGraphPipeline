@@ -62,6 +62,8 @@ trainer:
   weights_summary: "top"
   progress_bar_refresh_rate: 5
   resume_from_checkpoint: ${PATH.last_best}
+  # profiler: simple
+  # max_steps: 40000
 
 model:
   _target_: models.narrative_model.NarrativeModel
@@ -123,7 +125,7 @@ logger:
   wandb:
     _target_: pytorch_lightning.loggers.wandb.WandbLogger
     project: "narrative_analyst"
-    name: ${now:%A %b-%d %H:%M}_origin
+    name: ${now:%A %b-%d %H:%M}
     save_dir: "."
     offline: False # set True to store all logs only locally
     id: null # pass correct id to resume experiment!
