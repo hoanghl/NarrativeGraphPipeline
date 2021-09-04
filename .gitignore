@@ -145,3 +145,4 @@ cmd_for_tessera.sh
 *.ipynb
 sbatch.sh
 slurm.*
+multirun

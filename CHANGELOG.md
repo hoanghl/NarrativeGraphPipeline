@@ -2,6 +2,10 @@
 
 ### This file contains changes and modifications during developing.
 
+## Sep 4, 14:40
+
+- Add functionalities for _tuning_
+
 ## Aug 31, 17:49
 
 - Reimplement model **Yi Tay**

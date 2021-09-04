@@ -30,6 +30,7 @@ class NarrativeModel(plt.LightningModule):
         path_pretrained,
         path_valid_pred,
         path_train_pred,
+        tuning=False,
     ):
         super().__init__()
 
@@ -40,6 +41,7 @@ class NarrativeModel(plt.LightningModule):
         self.path_valid_pred = path_valid_pred
         self.path_train_pred = path_train_pred
         self.n_training_steps = size_dataset_train // batch_size * max_epochs
+        self.tuning = tuning
         self.bert_tokenizer = BertTokenizer.from_pretrained(path_pretrained)
 
         #############################
@@ -82,6 +84,9 @@ class NarrativeModel(plt.LightningModule):
         self.log("train/loss_step", loss, on_step=True, on_epoch=False, prog_bar=False)
         # logist: list of [b, la, d_vocab]
 
+        if self.tuning is True:
+            return loss
+
         logist = [torch.argmax(logist_, dim=1) for logist_ in logist]
         trgs = [batch["a1_ids"], batch["a2_ids"]] if len(logist) > 1 else [batch["a1_ids"]]
 
@@ -101,7 +106,7 @@ class NarrativeModel(plt.LightningModule):
     def training_epoch_end(self, outputs) -> None:
         outputs = self.all_gather(outputs)
 
-        if self.trainer.is_global_zero:
+        if not self.tuning and self.trainer.is_global_zero:
             ## Calculate mean loss
             loss = torch.mean(torch.cat([output["loss"] for output in outputs]))
             self.log("train/loss_epoch", loss, rank_zero_only=True)
@@ -185,6 +190,50 @@ class NarrativeModel(plt.LightningModule):
         self.log("valid/bleu_4", bleu_4, sync_dist=True)
         self.log("valid/meteor", meteor, sync_dist=True)
         self.log("valid/rouge_l", rouge_l, sync_dist=True)
+
+    def predict_step(self, batch, batch_idx: int, dataloader_idx: int = None):
+        _, logist = self.model.do_predict(**batch)
+        # logist: [b, la]
+
+        logist = [logist, logist]
+        trgs = [batch["a1_ids"], batch["a2_ids"]]
+
+        bz = batch["q_ids"].size(0)
+        preds = []
+        for i in range(bz):
+            for output, trg in zip(logist, trgs):
+                preds.append(
+                    {
+                        "pred": output[i].cpu().detach().numpy(),
+                        "trg": trg[i].cpu().detach().numpy(),
+                    }
+                )
+
+        return preds
+
+    def on_predict_epoch_end(self, results):
+        outputs = self.all_gather(results)
+
+        ## Calculate B-1, B-4, METEOR and ROUGE-L
+        output_ = []
+        for output in outputs:
+            output_.extend(output["prediction"])
+        outputs = []
+        for output in output_:
+            if len(output["pred"].size()) == 2:
+                for b in range(output["pred"].size(0)):
+                    outputs.append({"pred": output["pred"][b], "trg": output["trg"][b]})
+            else:
+                outputs.append(output)
+
+        outputs = self.get_prediction(outputs)
+
+        with open(self.path_valid_pred, "a+") as pred_file:
+            json.dump(outputs, pred_file, indent=2, ensure_ascii=False)
+
+        bleu_1, bleu_4, meteor, rouge_l = get_scores(outputs)
+
+        return bleu_1, bleu_4, meteor, rouge_l
 
     def configure_optimizers(self):
         no_decay = ["bias", "LayerNorm.weight"]

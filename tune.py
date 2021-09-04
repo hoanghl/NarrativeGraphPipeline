@@ -20,16 +20,6 @@ def main(config: DictConfig):
     config.PATH.utils = path_utils
     OmegaConf.resolve(config)
 
-    if "mode" not in config:
-        log.error("Mode not specified in config.")
-        sys.exit(1)
-    assert config.mode in [
-        "train",
-        "predict",
-        "debug_train",
-        "debug_predict",
-    ], f"Mode incorrect. Must be 'train'/'predict/debug_train/debug_predict', not {config.mode}"
-
     if config.mode.startswith("debug"):
         config.callbacks = config.logger = None
         os.chdir(config.work_dir)
@@ -40,8 +30,13 @@ def main(config: DictConfig):
         config.trainer.accelerator = "ddp"
         config.trainer.replace_sampler_ddp = True
 
+    if config.tuning is True:
+        config.trainer.check_val_every_n_epoch = 0
+
     utils.extras(config)
     utils.print_config(config, resolve=True)
+
+    log.info("########### Start tuning! ###########")
 
     # Init lightning datamodule
     log.info(f"Instantiating datamodule <{config.datamodule._target_}>")
@@ -49,15 +44,7 @@ def main(config: DictConfig):
 
     # Init lightning model
     log.info(f"Instantiating model <{config.model._target_}>")
-    model: LightningModule = hydra.utils.instantiate(config.model)
-
-    # Init lightning callbacks
-    callbacks: List[Callback] = []
-    if "callbacks" in config and config.callbacks is not None:
-        for _, cb_conf in config.callbacks.items():
-            if "_target_" in cb_conf:
-                log.info(f"Instantiating callback <{cb_conf._target_}>")
-                callbacks.append(hydra.utils.instantiate(cb_conf))
+    model: LightningModule = hydra.utils.instantiate(config.model, tuning=config.tuning)
 
     # Init lightning loggers
     default_log = "tensorboard" if "log" not in config else config.log
@@ -71,38 +58,36 @@ def main(config: DictConfig):
                 log.info(f"Instantiating logger <{lg_conf._target_}>")
                 logger.append(hydra.utils.instantiate(lg_conf))
 
-    # Init lightning trainer
-    log.info(f"Instantiating trainer <{config.trainer._target_}>")
-
-    ## Check if checkpoint path is specified
     if not os.path.isfile(config.trainer.resume_from_checkpoint):
         log.info("=> No previous checkpoint specified/found. Start fresh training.")
         config.trainer.resume_from_checkpoint = None
     else:
         log.info("=> Previous checkpoint found. Resume training.")
+    # Init lightning trainer
+    log.info(f"Instantiating trainer <{config.trainer._target_}>")
 
-    trainer: Trainer = hydra.utils.instantiate(
-        config.trainer, callbacks=callbacks, logger=logger, _convert_="partial"
-    )
+    ## Check if checkpoint path is specified
+    config.trainer.resume_from_checkpoint = None
+    trainer: Trainer = hydra.utils.instantiate(config.trainer, logger=logger, _convert_="partial")
 
     # Send some parameters from config to all lightning loggers
     log.info("Logging hyperparameters!")
     utils.log_hyperparameters(
         config=config,
         model=model,
+        callbacks=None,
         datamodule=datamodule,
         trainer=trainer,
-        callbacks=callbacks,
         logger=logger,
     )
 
     # Train the model
-    if config.mode.endswith("train"):
-        log.info("Starting training!")
-        trainer.fit(model=model, datamodule=datamodule)
-    else:
-        log.info("Starting predicting!")
-        trainer.predict(model=model, datamodule=datamodule)
+    log.info("Starting training!")
+    # FIXME: Uncomment the following
+    # trainer.fit(model=model, datamodule=datamodule)
+
+    log.info("Starting predicting!")
+    bleu_1, bleu_4, meteor, rouge_l = trainer.predict(model=model, datamodule=datamodule)
 
     # Make sure everything closed properly
     log.info("Finalizing!")
@@ -111,9 +96,10 @@ def main(config: DictConfig):
         model=model,
         datamodule=datamodule,
         trainer=trainer,
-        callbacks=callbacks,
         logger=logger,
     )
+
+    return bleu_1
 
 
 if __name__ == "__main__":

@@ -7,14 +7,65 @@ work_dir: ${hydra:runtime.cwd}
 data_dir: ${work_dir}/data/
 print_config: True
 ignore_warnings: True
-hydra:
-  run:
-    dir: logs/runs/${now:%Y-%m-%d}/${now:%H-%M-%S}
 
 defaults:
   # enable color logging
   - override hydra/hydra_logging: colorlog
   - override hydra/job_logging: colorlog
+  - override /hydra/sweeper: optuna
+
+optimized_metric: "valid/bleu_1"
+hydra:
+  run:
+    dir: logs/runs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+
+  sweeper:
+    _target_: hydra_plugins.hydra_optuna_sweeper.optuna_sweeper.OptunaSweeper
+    storage: null
+    study_name: null
+    n_jobs: 1
+
+    # 'minimize' or 'maximize' the objective
+    direction: maximize
+
+    # number of experiments that will be executed
+    n_trials: 10
+
+    # choose Optuna hyperparameter sampler
+    # learn more here: https://optuna.readthedocs.io/en/stable/reference/samplers.html
+    sampler:
+      _target_: optuna.samplers.TPESampler
+      seed: 48729
+      consider_prior: true
+      prior_weight: 1.0
+      consider_magic_clip: true
+      consider_endpoints: false
+      n_startup_trials: 10
+      n_ei_candidates: 24
+      multivariate: false
+      warn_independent_sampling: true
+
+    # define range of hyperparameters
+    search_space:
+      batch_size:
+        type: categorical
+        choices: [5, 8, 10]
+      model.w_decay:
+        type: float
+        low: 2e-2
+        high: 0.95
+      model.warmup_rate:
+        type: float
+        low: 0.1
+        high: 0.25
+      model.lr:
+        type: float
+        low: 1e-5
+        high: 2e-2
+
+      model.d_hid:
+        type: categorical
+        choices: [64, 128, 256]
 
 ##################################
 ## CONFIGURATIONS for components
@@ -31,6 +82,7 @@ PATH:
 
 mode: train
 multigpu: False
+tuning: False
 
 batch_size: 8
 n_workers: 8
