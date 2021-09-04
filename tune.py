@@ -84,7 +84,7 @@ def main(config: DictConfig):
     # Train the model
     log.info("Starting training!")
     # FIXME: Uncomment the following
-    # trainer.fit(model=model, datamodule=datamodule)
+    trainer.fit(model=model, datamodule=datamodule)
 
     log.info("Starting predicting!")
     bleu_1, bleu_4, meteor, rouge_l = trainer.predict(model=model, datamodule=datamodule)
