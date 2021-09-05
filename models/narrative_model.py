@@ -71,12 +71,8 @@ class NarrativeModel(plt.LightningModule):
     def get_prediction(self, pairs):
         pairs = [
             {
-                "pred": [
-                    " ".join(self.bert_tokenizer.convert_ids_to_tokens(p)) for p in pair["pred"]
-                ],
-                "trg": [
-                    " ".join(self.bert_tokenizer.convert_ids_to_tokens(p)) for p in pair["trg"]
-                ],
+                "pred": " ".join(self.bert_tokenizer.convert_ids_to_tokens(pair["pred"])),
+                "trg": " ".join(self.bert_tokenizer.convert_ids_to_tokens(pair["trg"])),
             }
             for pair in pairs
         ]
