@@ -7,14 +7,73 @@ work_dir: ${hydra:runtime.cwd}
 data_dir: ${work_dir}/data/
 print_config: True
 ignore_warnings: True
-hydra:
-  run:
-    dir: logs/runs/${now:%Y-%m-%d}/${now:%H-%M-%S}
 
 defaults:
   # enable color logging
   - override hydra/hydra_logging: colorlog
   - override hydra/job_logging: colorlog
+  - override /hydra/sweeper: optuna
+
+optimized_metric: "valid/bleu_1"
+hydra:
+  run:
+    dir: logs/runs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+
+  sweeper:
+    _target_: hydra_plugins.hydra_optuna_sweeper.optuna_sweeper.OptunaSweeper
+    storage: null
+    study_name: null
+    n_jobs: 1
+
+    # 'minimize' or 'maximize' the objective
+    direction: maximize
+
+    # number of experiments that will be executed
+    n_trials: 10
+
+    # choose Optuna hyperparameter sampler
+    # learn more here: https://optuna.readthedocs.io/en/stable/reference/samplers.html
+    sampler:
+      _target_: optuna.samplers.TPESampler
+      seed: 48729
+      consider_prior: true
+      prior_weight: 1.0
+      consider_magic_clip: true
+      consider_endpoints: false
+      n_startup_trials: 10
+      n_ei_candidates: 24
+      multivariate: false
+      warn_independent_sampling: true
+
+    # define range of hyperparameters
+    search_space:
+      batch_size:
+        type: categorical
+        choices: [5, 8, 10]
+      model.d_hid:
+        type: categorical
+        choices: [128, 256, 384]
+      model.d_graph:
+        type: categorical
+        choices: [512, 768, 1024]
+      model.n_edges:
+        type: categorical
+        choices: [40, 60, 80]
+      model.n_propagations:
+        type: categorical
+        choices: [1, 2, 3]
+      model.w_decay:
+        type: float
+        low: 2e-2
+        high: 0.95
+      model.warmup_rate:
+        type: float
+        low: 0.1
+        high: 0.25
+      model.lr:
+        type: float
+        low: 1e-5
+        high: 2e-2
 
 ##################################
 ## CONFIGURATIONS for components
@@ -22,24 +81,22 @@ defaults:
 PATH:
   utils: ""
   raw: ${PATH.utils}/raw
-  data: ${PATH.utils}/processed/story/[SPLIT]/data_[SHARD].parquet
+  data: ${PATH.utils}/processed/story/[SPLIT].parquet
   pretrained: ${PATH.utils}/bert-base-uncased
   train_pred: ${work_dir}/logs/train_pred.json
   valid_pred: ${work_dir}/logs/valid_pred.json
   pred: ${data_dir}/prediction.json
   last_best: ${work_dir}/logs/last_best.ckpt
 
-mode: train
-# There are 3 modes: train, predict and debug
+mode: train # There are 4 modes: train, predict, debug_train and debug_predict
+multigpu: False
 
 batch_size: 5
-n_workers: 8
-n_shards: 4
 
-lq: 35 # sequence length of query (question)
-lc: 180 # sequence length of each para of context
+lq: 33
+lc: 178
 nc: 10
-la: 12 # sequence length of answer
+la: 10
 sizes_dataset:
   train: 32747
   test: 10557
@@ -48,9 +105,11 @@ sizes_dataset:
 trainer:
   _target_: pytorch_lightning.Trainer
   gpus: 1
+  precision: 32
+  accelerator: null
+  replace_sampler_ddp: False
   min_epochs: 1
   max_epochs: 60
-  # precision: 16
   auto_lr_find: False
   terminate_on_nan: True
   log_every_n_steps: 40
@@ -87,10 +146,8 @@ model:
 datamodule:
   _target_: datamodules.narrative_datamodule.NarrativeDataModule
   batch_size: ${batch_size}
-  sizes_dataset: ${sizes_dataset}
   lc: ${lc}
   nc: ${nc}
-  n_shards: ${n_shards}
   path_data: ${PATH.data}
 
 callbacks:
@@ -125,7 +182,7 @@ logger:
   wandb:
     _target_: pytorch_lightning.loggers.wandb.WandbLogger
     project: "narrative_graph"
-    name: ${now:%A %b-%d %H:%M}_nograph
+    name: ${now:%A %b-%d %H:%M}
     save_dir: "."
     offline: False # set True to store all logs only locally
     id: null # pass correct id to resume experiment!

@@ -1,5 +1,13 @@
 ### This file contains changes and modifications during developing.
 
+## Sep 5, 13:34
+
+- Apply template for **MultiGPU training** and **Optuna hparams search**
+- Fix error: q_ids, c_ids.. not correct in module **dataset**
+- Train with 2 answers
+- Refactor some code segments
+- Discard **file shard** method
+
 ## Aug 26, 23:47
 
 - Relace current backbone by **CHIME**

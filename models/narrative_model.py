@@ -3,12 +3,7 @@ import json
 import pytorch_lightning as plt
 import torch
 import torch.nn as torch_nn
-from transformers import (
-    AdamW,
-    BertTokenizer,
-    get_cosine_with_hard_restarts_schedule_with_warmup,
-    get_linear_schedule_with_warmup,
-)
+from transformers import AdamW, BertTokenizer, get_linear_schedule_with_warmup
 
 from models.layers.chime import CHIME
 from utils.model_utils import get_scores
@@ -62,92 +57,138 @@ class NarrativeModel(plt.LightningModule):
             dropout=dropout,
             n_propagations=n_propagations,
             path_pretrained=path_pretrained,
+            criterion=torch_nn.CrossEntropyLoss(ignore_index=self.bert_tokenizer.pad_token_id),
         )
 
         #############################
         # Define things
         #############################
-        self.criterion = torch_nn.CrossEntropyLoss(ignore_index=self.bert_tokenizer.pad_token_id)
 
     ####################################################################
     # FOR TRAINING PURPOSE
     ####################################################################
 
-    def get_prediction(self, output_mle, a1_ids, a2_ids):
-        prediction = [
+    def get_prediction(self, pairs):
+        pairs = [
             {
-                "pred": " ".join(self.bert_tokenizer.convert_ids_to_tokens(pred_)),
-                "ref": [
-                    " ".join(self.bert_tokenizer.convert_ids_to_tokens(ans1_)),
-                    " ".join(self.bert_tokenizer.convert_ids_to_tokens(ans2_)),
+                "pred": [
+                    " ".join(self.bert_tokenizer.convert_ids_to_tokens(p)) for p in pair["pred"]
+                ],
+                "trg": [
+                    " ".join(self.bert_tokenizer.convert_ids_to_tokens(p)) for p in pair["trg"]
                 ],
             }
-            for pred_, ans1_, ans2_ in zip(output_mle, a1_ids, a2_ids)
+            for pair in pairs
         ]
 
-        return prediction
+        return pairs
 
     def training_step(self, batch, batch_idx):
-        output_mle, trgs = self.model.do_train(
-            batch["q_ids"], batch["c_ids"], batch["a1_ids"], batch["c_masks"]
+        loss, logist = self.model.do_train(
+            batch["q_ids"], batch["c_ids"], batch["a1_ids"], batch["a2_ids"], batch["c_masks"]
         )
-        # trgs: [b, la + 1]
-        # output_mle: [b, d_vocab, la + 1]
+        # output_mle: [b, la + 2, d_vocab]
 
-        loss = self.criterion(output_mle, trgs)
-        self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=False)
+        self.log("train/loss_step", loss, on_step=True, on_epoch=False, prog_bar=False)
 
-        return {
-            "loss": loss,
-            "pred": (
-                torch.argmax(output_mle, dim=1).cpu().detach(),
-                batch["a1_ids"].cpu().detach(),
-                batch["a2_ids"].cpu().detach(),
-            ),
-        }
+        logist = [torch.argmax(logist_, dim=1) for logist_ in logist]
+        trgs = [batch["a1_ids"], batch["a2_ids"]] if len(logist) > 1 else [batch["a1_ids"]]
+
+        bz = batch["q_ids"].size(0)
+        preds = []
+        for i in range(bz):
+            for output, trg in zip(logist, trgs):
+                preds.append(
+                    {
+                        "pred": output[i].cpu().detach().numpy(),
+                        "trg": trg[i].cpu().detach().numpy(),
+                    }
+                )
+
+        return {"loss": loss, "prediction": preds}
 
     def training_epoch_end(self, outputs) -> None:
-        preds = []
-        for p in [out["pred"] for out in outputs]:
-            preds.extend(self.get_prediction(p[0], p[1], p[2]))
+        outputs = self.all_gather(outputs)
 
-        with open(self.path_train_pred, "a+") as pred_file:
-            json.dump(preds, pred_file, indent=2, ensure_ascii=False)
+        if self.trainer.is_global_zero:
+            ## Calculate mean loss
+            loss = torch.mean(torch.cat([output["loss"] for output in outputs]))
+            self.log("train/loss_epoch", loss, rank_zero_only=True)
 
-        bleu_1, bleu_4, meteor, rouge_l = get_scores(preds)
+            ## Calculate B-1, B-4, METEOR and ROUGE-L
+            output_ = []
+            for output in outputs:
+                output_.extend(output["prediction"])
+            outputs = []
+            for output in output_:
+                if len(output["pred"].size()) == 2:
+                    for b in range(output["pred"].size(0)):
+                        outputs.append({"pred": output["pred"][b], "trg": output["trg"][b]})
+                else:
+                    outputs.append(output)
 
-        self.log("train/bleu_1", bleu_1, on_epoch=True, prog_bar=False)
-        self.log("train/bleu_4", bleu_4, on_epoch=True, prog_bar=False)
-        self.log("train/meteor", meteor, on_epoch=True, prog_bar=False)
-        self.log("train/rouge_l", rouge_l, on_epoch=True, prog_bar=False)
+            outputs = self.get_prediction(outputs)
+
+            with open(self.path_train_pred, "a+") as pred_file:
+                json.dump(outputs, pred_file, indent=2, ensure_ascii=False)
+
+            bleu_1, bleu_4, meteor, rouge_l = get_scores(outputs)
+
+            self.log("train/bleu_1", bleu_1, rank_zero_only=True)
+            self.log("train/bleu_4", bleu_4, rank_zero_only=True)
+            self.log("train/meteor", meteor, rank_zero_only=True)
+            self.log("train/rouge_l", rouge_l, rank_zero_only=True)
 
     def test_step(self, batch, batch_idx):
         return None
 
     def validation_step(self, batch, batch_idx):
-        pred = self.model.do_predict(batch["q_ids"], batch["c_ids"], batch["c_masks"], self.la)
+        logist = self.model.do_predict(batch["q_ids"], batch["c_ids"], batch["c_masks"], self.la)
+        # logist: [b, la]
 
-        return {
-            "pred": (
-                pred.cpu().detach(),
-                batch["a1_ids"].cpu().detach(),
-                batch["a2_ids"].cpu().detach(),
-            ),
-        }
+        logist = [logist, logist]
+        trgs = [batch["a1_ids"], batch["a2_ids"]]
+
+        bz = batch["q_ids"].size(0)
+        preds = []
+        for i in range(bz):
+            for output, trg in zip(logist, trgs):
+                preds.append(
+                    {
+                        "pred": output[i].cpu().detach().numpy(),
+                        "trg": trg[i].cpu().detach().numpy(),
+                    }
+                )
+
+        return {"prediction": preds}
 
     def validation_epoch_end(self, outputs) -> None:
-        preds = []
-        for p in [out["pred"] for out in outputs]:
-            preds.extend(self.get_prediction(p[0], p[1], p[2]))
+        outputs = self.all_gather(outputs)
+
+        ## Calculate B-1, B-4, METEOR and ROUGE-L
+        output_ = []
+        for output in outputs:
+            output_.extend(output["prediction"])
+        outputs = []
+        for output in output_:
+            if len(output["pred"].size()) == 2:
+                for b in range(output["pred"].size(0)):
+                    outputs.append({"pred": output["pred"][b], "trg": output["trg"][b]})
+            else:
+                outputs.append(output)
+
+        outputs = self.get_prediction(outputs)
 
         with open(self.path_valid_pred, "a+") as pred_file:
-            json.dump(preds, pred_file, indent=2, ensure_ascii=False)
+            json.dump(outputs, pred_file, indent=2, ensure_ascii=False)
 
-        bleu_1, bleu_4, meteor, rouge_l = get_scores(preds)
-        self.log("valid/bleu_1", bleu_1, on_epoch=True, prog_bar=False)
-        self.log("valid/bleu_4", bleu_4, on_epoch=True, prog_bar=False)
-        self.log("valid/meteor", meteor, on_epoch=True, prog_bar=False)
-        self.log("valid/rouge_l", rouge_l, on_epoch=True, prog_bar=False)
+        bleu_1, bleu_4, meteor, rouge_l = get_scores(outputs)
+
+        # if self.trainer.is_global_zero:
+        self.log("valid/bleu_1", bleu_1, sync_dist=True)
+        self.log("valid/bleu_4", bleu_4, sync_dist=True)
+        self.log("valid/meteor", meteor, sync_dist=True)
+        self.log("valid/rouge_l", rouge_l, sync_dist=True)
 
     def configure_optimizers(self):
         no_decay = ["bias", "LayerNorm.weight"]
@@ -172,11 +213,10 @@ class NarrativeModel(plt.LightningModule):
         optimizer = AdamW(params=optimizer_grouped_parameters, lr=self.lr)
 
         lr_scheduler = {
-            "scheduler": get_cosine_with_hard_restarts_schedule_with_warmup(
+            "scheduler": get_linear_schedule_with_warmup(
                 optimizer,
                 num_warmup_steps=int(self.n_training_steps * self.warmup_rate),
                 num_training_steps=self.n_training_steps,
-                num_cycles=6,
             ),
             "name": "learning_rate",
             "interval": "step",

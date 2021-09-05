@@ -1,6 +1,5 @@
 import re
 
-import numpy as np
 import torch
 import torch.nn as nn
 from nltk.translate.bleu_score import sentence_bleu
@@ -51,56 +50,42 @@ def ipot(a1, a2, beta=2, max_iter=100, L=1):
 
 
 def process_sent(sent):
-    return re.sub(r"(\[PAD\]|\[CLS\]|\[SEP\]|\[UNK\]|\[MASK\])", "", sent).strip()
+    sent = re.sub(r"(\[PAD\]|\[CLS\]|\[SEP\]|\[UNK\]|\[MASK\])", "", sent).strip()
+    sent = re.sub(r"\s{2,}", " ", sent)
+
+    return sent
 
 
 def get_scores(outputs, eps=10e-8):
     n_samples = 0
     bleu_1, bleu_4, meteor, rouge_l = 0, 0, 0, 0
     for pair in outputs:
-
         pred = process_sent(pair["pred"])
-        ref = list(map(process_sent, pair["ref"]))
+        ref = process_sent(pair["trg"])
 
         if pred == "":
-            bleu_1_, bleu_4_, meteor_, rouge_l_ = 0, 0, 0, 0
+            continue
 
-        else:
-            try:
-                # Calculate BLEU score
-                ref_ = [x.split() for x in ref]
-                pred_ = pred.split()
-
-                bleu_1_ = sentence_bleu(ref_, pred_, weights=(1, 0, 0, 0))
-                bleu_4_ = sentence_bleu(ref_, pred_, weights=(0.25, 0.25, 0.25, 0.25))
-
-                # Calculate METEOR
-                meteor_ = meteor_score(ref, pred)
-
-                # Calculate ROUGE-L
-                scores = np.array(
-                    [
-                        Rouge().get_scores(ref_, pred, avg=True)["rouge-l"]["f"]
-                        if ref != ""
-                        else 0
-                        for ref_ in ref
-                    ]
-                )
-                rouge_l_ = np.mean(scores)
-            except ValueError:
-                bleu_1_, bleu_4_, meteor_, rouge_l_ = 0, 0, 0, 0
+        try:
+            bleu_1_ = sentence_bleu([ref.split()], pred.split(), weights=(1, 0, 0, 0))
+            bleu_4_ = sentence_bleu([ref.split()], pred.split(), weights=(0.25, 0.25, 0.25, 0.25))
+            meteor_ = meteor_score([ref], pred)
+            rouge_l_ = Rouge().get_scores(ref, pred, avg=True)["rouge-l"]["f"]
+        except ValueError:
+            pass
 
         bleu_1 += bleu_1_ if bleu_1_ > eps else 0
         bleu_4 += bleu_4_ if bleu_4_ > eps else 0
         meteor += meteor_ if meteor_ > eps else 0
         rouge_l += rouge_l_ if rouge_l_ > eps else 0
+
         n_samples += 1
 
     return (
-        bleu_1 / n_samples,
-        bleu_4 / n_samples,
-        meteor / n_samples,
-        rouge_l / n_samples,
+        bleu_1 / n_samples if n_samples > 0 else 0,
+        bleu_4 / n_samples if n_samples > 0 else 0,
+        meteor / n_samples if n_samples > 0 else 0,
+        rouge_l / n_samples if n_samples > 0 else 0,
     )
 
 

@@ -34,6 +34,12 @@ def main(config: DictConfig):
         config.callbacks = config.logger = None
         os.chdir(config.work_dir)
 
+    if config.multigpu is True:
+        config.trainer.precision = 32
+        config.trainer.gpus = -1
+        config.trainer.accelerator = "ddp"
+        config.trainer.replace_sampler_ddp = True
+
     utils.extras(config)
     utils.print_config(config, resolve=True)
 

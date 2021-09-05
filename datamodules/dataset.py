@@ -1,4 +1,3 @@
-import glob
 from random import sample
 
 import numpy as np
@@ -8,109 +7,56 @@ from torch.utils.data import Dataset
 
 
 class NarrativeDataset(Dataset):
-    def __init__(
-        self,
-        split,
-        path_data,
-        size_dataset,
-        nc,
-        lc,
-        n_shards,
-    ):
+    def __init__(self, split, path_data, nc, lc):
 
-        self.split = split
         self.nc = nc
         self.lc = lc
-        self.n_shards = n_shards
-        self.size_dataset = size_dataset
 
-        path_data = path_data.replace("[SPLIT]", split).replace("[SHARD]", "*")
-        self.paths = sorted(glob.glob(path_data))
-
-        self.curent_ith_file = -1
-
-        self.q_ids = None
-        self.q_masks = None
-        self.a1_ids = None
-        self.a1_masks = None
-        self.a2_ids = None
-        self.c_ids = None
-        self.c_masks = None
+        self.q_ids = []
+        self.a1_ids = []
+        self.a2_ids = []
+        self.c_ids = []
+        self.c_masks = []
 
         self.exchange_rate = 0.5
 
+        self.read_datasetfile(path_data, split)
+
     def __len__(self) -> int:
-        return self.size_dataset
+        return len(self.q_ids)
 
     def __getitem__(self, indx):
         if torch.is_tensor(indx):
             indx = indx.tolist()
 
-        size_shard = self.size_dataset // self.n_shards
-
-        ith_file = indx // size_shard
-        indx = indx % size_shard
-
-        if ith_file == self.n_shards:
-            ith_file -= 1
-            indx = indx + size_shard
-
-        # Check nth file and reload dataset if needed
-        if ith_file != self.curent_ith_file:
-            self.curent_ith_file = ith_file
-
-            # Reload dataset
-            self.read_datasetfile(self.paths[self.curent_ith_file])
-
         return {
             "q_ids": self.q_ids[indx],
-            "q_masks": self.q_masks[indx],
             "a1_ids": self.a1_ids[indx],
             "a2_ids": self.a2_ids[indx],
-            "a1_masks": self.a1_masks[indx],
             "c_ids": self.c_ids[indx],
             "c_masks": self.c_masks[indx],
         }
 
-    def _get_context(self, En, Hn):
-        n_samples = min((len(En), self.nc))
-        if self.split == "train":
-            selects_Hn = int(n_samples * self.exchange_rate)
-            selects_En = n_samples - selects_Hn
+    def read_datasetfile(self, path_data, split):
 
-            return sample(En, selects_En) + sample(Hn, selects_Hn)
-
-        return sample(Hn, n_samples)
-
-    def read_datasetfile(self, path_file):
-        df = pd.read_parquet(path_file)
-
-        self.q_ids = []
-        self.q_masks = []
-        self.a1_ids = []
-        self.a1_masks = []
-        self.a2_ids = []
-        self.c_ids = []
-        self.c_masks = []
+        df = pd.read_parquet(path_data.replace("[SPLIT]", split))
 
         for entry in df.itertuples():
-            self.q_ids.append(np.copy(entry.q_ids))
-            self.q_masks.append(np.copy(entry.q_masks))
-            self.a1_ids.append(np.copy(entry.a1_ids))
-            self.a1_masks.append(np.copy(entry.a1_masks))
-            self.a2_ids.append(np.copy(entry.a2_ids))
-
-            c_E_ids = np.copy(np.reshape(entry.c_E_ids, (-1, self.lc)))
-            c_E_masks = np.copy(np.reshape(entry.c_E_masks, (-1, self.lc)))
-            c_H_ids = np.copy(np.reshape(entry.c_H_ids, (-1, self.lc)))
-            c_H_masks = np.copy(np.reshape(entry.c_H_masks, (-1, self.lc)))
+            q = entry.q_ids[(entry.q_ids != 101) & (entry.q_ids != 102)]
+            a1 = entry.a1_ids[(entry.a1_ids != 101) & (entry.a1_ids != 102)]
+            a2 = entry.a1_ids[(entry.a1_ids != 101) & (entry.a1_ids != 102)]
+            c_E_ids = entry.c_E_ids[(entry.c_E_ids != 101) & (entry.c_E_ids != 102)]
+            c_E_ids = np.reshape(c_E_ids, (-1, self.lc))
+            c_H_ids = entry.c_H_ids[(entry.c_H_ids != 101) & (entry.c_H_ids != 102)]
+            c_H_ids = np.reshape(c_H_ids, (-1, self.lc))
+            c_E_masks = np.reshape(entry.c_E_masks, (-1, self.lc + 2))[:, 2:]
+            c_H_masks = np.reshape(entry.c_H_masks, (-1, self.lc + 2))[:, 2:]
 
             c_ids = np.zeros((self.nc, self.lc), dtype=int)
             c_masks = np.zeros((self.nc, self.lc), dtype=int)
 
             n_samples = c_E_ids.shape[0]
-            if self.split == "train":
-
+            if split == "train":
                 ratio_Hn = int(n_samples * self.exchange_rate)
                 indices_Hn = sample(range(n_samples), ratio_Hn)
                 c_H_ids = c_H_ids[indices_Hn]
@@ -128,6 +74,9 @@ class NarrativeDataset(Dataset):
                 c_ids[:n_samples] = c_H_ids
                 c_masks[:n_samples] = c_H_masks
 
+            self.q_ids.append(np.copy(q))
+            self.a1_ids.append(np.copy(a1))
+            self.a2_ids.append(np.copy(a2))
             self.c_ids.append(c_ids)
             self.c_masks.append(c_masks)
 
