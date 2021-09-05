@@ -146,3 +146,4 @@ data
 *.ipynb
 sbatch.sh
 slurm.*
+multirun

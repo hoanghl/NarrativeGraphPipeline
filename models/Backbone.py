@@ -70,7 +70,7 @@ class Backbone(torch_nn.Module):
         output_mle,
         trgs,
         is_loss_ot=False,
-        gamma=0.08,
+        gamma=0.25,
         a1_ids=None,
         a1_masks=None,
         a2_ids=None,
@@ -85,15 +85,13 @@ class Backbone(torch_nn.Module):
             loss += loss_mle
 
             if is_loss_ot:
-                trg = self.encoder(trg)[0]
+                trg = self.embedding.encoder(trg)[0]
                 pred = (
                     torch.softmax(output.transpose(-1, -2), dim=-1)
-                    @ self.encoder.embeddings.word_embeddings.weight
+                    @ self.embedding.encoder.embeddings.word_embeddings.weight
                 )
                 loss_ot = ipot(pred, trg, max_iter=400)
-            else:
-                loss_ot = 0
-            loss += gamma * loss_ot
+                loss += gamma * loss_ot
 
             if is_loss_bert:
                 output = torch.softmax(output.transpose(-1, -2), dim=-1)
@@ -113,7 +111,7 @@ class Backbone(torch_nn.Module):
         # c: [b, nc, lc]
         # a: [b, la]
 
-        q_mem, c_mem, a_mem = None, None, None
+        c_mem, a_mem = None, None
         for i in range(c_ids.size(1)):
             ## Encode q, c and a using Bert
             q, ci, a, trgs = self.embedding(q_ids, c_ids[:, i], a_ids, a_ids.size(-1))
@@ -136,7 +134,7 @@ class Backbone(torch_nn.Module):
             # [b, la, d]
 
             # Apply Short-term Memory
-            q_mem, c_mem, a_mem = self.shortterm_mem(q, ci, a, q_mem, c_mem, a_mem)
+            c_mem, a_mem = self.shortterm_mem(ci, a, c_mem, a_mem)
 
         output_mle = self.decoder(a_mem)
         # [b, la + 2, d_vocab]
@@ -152,8 +150,8 @@ class Backbone(torch_nn.Module):
             output_mle.append(output_mle_)
             trgs.append(trgs_)
 
-        # NOTE: Temporarily not using OT loss and BERT loss
-        loss = self.get_loss(output_mle=output_mle, trgs=trgs)
+        # NOTE: Temporarily not using BERT loss
+        loss = self.get_loss(output_mle=output_mle, trgs=trgs, is_loss_ot=True)
 
         return loss, output_mle
 

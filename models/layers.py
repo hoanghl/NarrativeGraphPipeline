@@ -158,6 +158,9 @@ class Embedding(torch_nn.Module):
 
         return q, ci, a, trgs
 
+    def encode_trgs(self, trgs):
+        return self.encoder(trgs)[0]
+
 
 class DualAttention(torch_nn.Module):
     def __init__(self, d_hid):
@@ -284,35 +287,25 @@ class ShortTermMemoryCell(torch_nn.Module):
         self.gate_c = torch_nn.Sequential(torch_nn.Linear(d * 2, 1), torch_nn.Sigmoid())
         self.gate_a = torch_nn.Sequential(torch_nn.Linear(d * 2, 1), torch_nn.Sigmoid())
 
-    def forward(self, q, c, a, q_mem, c_mem, a_mem):
-        if not torch.is_tensor(q_mem):
-            return q, c, a
+    def forward(self, c, a, c_mem, a_mem):
+        if not torch.is_tensor(c_mem):
+            return c, a
 
-        ## Use TransEnc to retrieve from new tensors q and c
-        q_ = self.q_mem_enc(q_mem, q, q)
-        # [b, lq, d]
+        ## Use TransEnc to retrieve from new tensor c
         c_ = self.q_mem_enc(c_mem, c, c)
         # [b, lc, d]
-
-        q_retrv = self.a_mem_enc(a, q, q)
-        # [b, la, d]
-        c_retrv = self.a_mem_enc(a, c, c)
-        # [b, la, d]
-        a_retrv = self.ff(torch.cat((q_retrv, c_retrv, a), -1))
+        a_retrv = self.a_mem_enc(a, c_, c_)
         # [b, la, d]
 
         ## Update memory
-        gate_q = self.gate_q(torch.cat((q_, q), -1))
-        # [b, lq, 1]
         gate_c = self.gate_c(torch.cat((c_, c), -1))
         # [b, lc, 1]
         gate_a = self.gate_a(torch.cat((a_retrv, a), -1))
         # [b, la, 1]
-        q_mem = gate_q * q_mem + (1 - gate_q) * q
         c_mem = gate_c * c_mem + (1 - gate_c) * c
         a_mem = gate_a * a_mem + (1 - gate_a) * a
 
-        return q_mem, c_mem, a_mem
+        return c_mem, a_mem
 
 
 class SelfAttnQueryRetrv(torch_nn.Module):

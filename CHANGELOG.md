@@ -1,6 +1,10 @@
-# CHANGELOG
-
 ### This file contains changes and modifications during developing.
+
+## Sep 5, 16:04
+
+- Remove _q_memory_ component
+- Add functionalities for _tuning_
+- Use OT loss
 
 ## Aug 31, 21:47
 

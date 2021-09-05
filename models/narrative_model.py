@@ -27,6 +27,7 @@ class NarrativeModel(plt.LightningModule):
         num_layers_q,
         num_layers_a,
         lr,
+        w_decay,
         dropout,
         size_dataset_train,
         max_epochs,
@@ -35,20 +36,23 @@ class NarrativeModel(plt.LightningModule):
         path_pred,
         path_train_pred,
         path_valid_pred,
+        tuning=False,
     ):
 
         super().__init__()
 
-        self.d_vocab = d_vocab
-        self.lr = lr
-        self.la = la
         self.batch_size = batch_size
+        self.d_vocab = d_vocab
+        self.la = la
+        self.lr = lr
+        self.w_decay = w_decay
+        self.warmup_rate = warmup_rate
         self.size_dataset_train = size_dataset_train
         self.max_epochs = max_epochs
-        self.warmup_rate = warmup_rate
         self.path_pred = path_pred
         self.path_train_pred = path_train_pred
         self.path_valid_pred = path_valid_pred
+        self.tuning = tuning
         self.bert_tokenizer = BertTokenizer.from_pretrained(path_pretrained)
 
         os.makedirs(os.path.dirname(path_valid_pred), exist_ok=True)
@@ -163,6 +167,9 @@ class NarrativeModel(plt.LightningModule):
         return 0
 
     def validation_step(self, batch: Any, batch_idx):
+        if self.tuning is True:
+            return 0
+
         logist = self.model.do_predict(batch["q_ids"], batch["c_ids"], self.la)
         # logist: [b, la]
 
@@ -183,6 +190,9 @@ class NarrativeModel(plt.LightningModule):
         return {"prediction": preds}
 
     def validation_epoch_end(self, outputs) -> None:
+        if self.tuning is True:
+            return None
+
         outputs = self.all_gather(outputs)
 
         # if self.trainer.is_global_zero:
@@ -215,6 +225,47 @@ class NarrativeModel(plt.LightningModule):
         self.log("valid/meteor", meteor, sync_dist=True)
         self.log("valid/rouge_l", rouge_l, sync_dist=True)
 
+    def predict_step(self, batch, batch_idx: int, dataloader_idx: int = None):
+        logist = self.model.do_predict(batch["q_ids"], batch["c_ids"], self.la)
+        # logist: [b, la]
+
+        logist = [logist, logist]
+        trgs = [batch["a1_ids"], batch["a2_ids"]]
+
+        bz = batch["q_ids"].size(0)
+        preds = []
+        for i in range(bz):
+            for output, trg in zip(logist, trgs):
+                preds.append(
+                    {
+                        "pred": output[i].cpu().detach().numpy(),
+                        "trg": trg[i].cpu().detach().numpy(),
+                    }
+                )
+
+        return {"prediction": preds}
+
+    def on_predict_epoch_end(self, results):
+        outputs = self.all_gather(results)
+
+        ## Calculate B-1, B-4, METEOR and ROUGE-L
+        output_ = []
+        for output in outputs:
+            output_.extend(output["prediction"])
+        outputs = []
+        for output in output_:
+            if len(output["pred"].size()) == 2:
+                for b in range(output["pred"].size(0)):
+                    outputs.append({"pred": output["pred"][b], "trg": output["trg"][b]})
+            else:
+                outputs.append(output)
+
+        outputs = self.get_prediction(outputs)
+
+        bleu_1, bleu_4, meteor, rouge_l = get_scores(outputs)
+
+        return bleu_1, bleu_4, meteor, rouge_l
+
     def configure_optimizers(self):
         no_decay = ["bias", "LayerNorm.weight"]
         params_decay, params_nodecay = [], []
@@ -228,7 +279,7 @@ class NarrativeModel(plt.LightningModule):
         optimizer_grouped_parameters = [
             {
                 "params": params_decay,
-                "weight_decay": 0.95,
+                "weight_decay": self.w_decay,
             },
             {
                 "params": params_nodecay,

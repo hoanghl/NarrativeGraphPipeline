@@ -1,4 +1,4 @@
-# Narrative Model
+# NarrativeGraphPipeline
 
 ## This repo contains code for incoming paper.
 
@@ -12,16 +12,17 @@ I recommend using **conda**. To install conda environment, run the following:
 
 ## 2. How to run
 
-- Run the following to create training/validation data:
-
-> python -m data_utils.preprocess
-
-- Then run the following to start training:
+Run the following:
 
 > python run.py
 
-## 3. Components
+### 3. How to tune
 
-### 3.1. Data reading
+Run the following:
 
-Read stories and scripts from files, initially preprocess and decompose them into paragraphs.
+> python tune.py --multirun
+
+### 4. Additional flags
+
+- If using **WandB logger**, add the flag `+log=wandb`
+- If using **multi GPUs**, add the flag `multigpu=True`
