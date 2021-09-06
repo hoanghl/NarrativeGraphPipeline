@@ -85,7 +85,7 @@ class NarrativeModel(plt.LightningModule):
         )
         # output_mle: [b, la + 2, d_vocab]
 
-        self.log("train/loss_step", loss, on_step=True, on_epoch=False, prog_bar=False)
+        self.log("train/loss_step", loss)
 
         logist = [torch.argmax(logist_, dim=1) for logist_ in logist]
         trgs = [batch["a1_ids"], batch["a2_ids"]] if len(logist) > 1 else [batch["a1_ids"]]
@@ -108,7 +108,8 @@ class NarrativeModel(plt.LightningModule):
 
         if self.trainer.is_global_zero:
             ## Calculate mean loss
-            loss = torch.mean(torch.cat([output["loss"] for output in outputs]))
+            loss = torch.cat([output["loss"].unsqueeze(0) for output in outputs]).mean()
+            
             self.log("train/loss_epoch", loss, rank_zero_only=True)
 
             ## Calculate B-1, B-4, METEOR and ROUGE-L

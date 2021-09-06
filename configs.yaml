@@ -136,7 +136,7 @@ model:
   lr: 1e-5
   w_decay: 0.9
   dropout: 0.2
-  warmup_rate: 0.25
+  warmup_rate: 0.2
   size_dataset_train: ${sizes_dataset.train}
   max_epochs: ${trainer.max_epochs}
   path_pretrained: ${PATH.pretrained}

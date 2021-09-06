@@ -142,3 +142,6 @@ tests/
 .vscode
 cmd_for_tessera.sh
 .vector_cache
+sbatch.sh
+slurm.*
+multirun
