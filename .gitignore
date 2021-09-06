@@ -145,3 +145,4 @@ cmd_for_tessera.sh
 sbatch.sh
 slurm.*
 multirun
+*.parquet

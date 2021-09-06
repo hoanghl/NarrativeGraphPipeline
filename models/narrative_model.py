@@ -4,9 +4,9 @@ import pytorch_lightning as plt
 import torch
 import torch.nn as torch_nn
 from transformers import AdamW, BertTokenizer, get_linear_schedule_with_warmup
+from utils.model_utils import get_scores
 
 from models.layers.chime import CHIME
-from utils.model_utils import get_scores
 
 
 class NarrativeModel(plt.LightningModule):
@@ -33,7 +33,6 @@ class NarrativeModel(plt.LightningModule):
         path_train_pred,
     ):
         super().__init__()
-
         self.la = la
         self.lr = lr
         self.w_decay = w_decay
@@ -84,10 +83,9 @@ class NarrativeModel(plt.LightningModule):
             batch["q_ids"], batch["c_ids"], batch["a1_ids"], batch["a2_ids"], batch["c_masks"]
         )
         # output_mle: [b, la + 2, d_vocab]
-
         self.log("train/loss_step", loss)
 
-        logist = [torch.argmax(logist_, dim=1) for logist_ in logist]
+        logist = [torch.argmax(logist_, dim=-1) for logist_ in logist]
         trgs = [batch["a1_ids"], batch["a2_ids"]] if len(logist) > 1 else [batch["a1_ids"]]
 
         bz = batch["q_ids"].size(0)
@@ -96,8 +94,8 @@ class NarrativeModel(plt.LightningModule):
             for output, trg in zip(logist, trgs):
                 preds.append(
                     {
-                        "pred": output[i].cpu().detach().numpy(),
-                        "trg": trg[i].cpu().detach().numpy(),
+                        "pred": output[i],
+                        "trg": trg[i],
                     }
                 )
 
@@ -109,7 +107,6 @@ class NarrativeModel(plt.LightningModule):
         if self.trainer.is_global_zero:
             ## Calculate mean loss
             loss = torch.cat([output["loss"].unsqueeze(0) for output in outputs]).mean()
-            
             self.log("train/loss_epoch", loss, rank_zero_only=True)
 
             ## Calculate B-1, B-4, METEOR and ROUGE-L
