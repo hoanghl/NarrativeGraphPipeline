@@ -1,5 +1,9 @@
 ### This file contains changes and modifications during developing.
 
+## Sep 7, 16:40
+
+- Apply **DP** instead of old **DDP** for _multi training_
+
 ## Sep 5, 13:34
 
 - Apply template for **MultiGPU training** and **Optuna hparams search**

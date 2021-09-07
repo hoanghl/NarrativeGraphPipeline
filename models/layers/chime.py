@@ -1,8 +1,7 @@
 import torch
 import torch.nn as torch_nn
-from transformers import BertModel, BertTokenizer, logging
-
 from models.layers.graph_layer import GraphBasedReasoningLayer
+from transformers import BertModel, BertTokenizer, logging
 from utils.model_utils import TransEncoder
 
 logging.set_verbosity_error()
@@ -294,12 +293,13 @@ class CHIME(torch_nn.Module):
 
         return output_mle, trg
 
-    def do_train(self, q, c, a1, a2, c_masks):
+    def do_train(self, q, c, a1, a2, c_masks, use_2_answers=False):
         edge_index = self._get_edge_index(c_masks)
         # [b, 2, n_edges]
 
         output_mle, trgs = [], []
-        for a in [a1, a2]:
+        ans = [a1, a2] if use_2_answers else [a1]
+        for a in ans:
             output, trg = self(q, c, a, edge_index)
 
             output_mle.append(output)

@@ -37,19 +37,11 @@ def main(config: DictConfig):
     if config.multigpu is True:
         config.trainer.precision = 32
         config.trainer.gpus = -1
-        config.trainer.accelerator = "ddp"
+        config.trainer.accelerator = "dp"
         config.trainer.replace_sampler_ddp = True
 
     utils.extras(config)
     utils.print_config(config, resolve=True)
-
-    # Init lightning datamodule
-    log.info(f"Instantiating datamodule <{config.datamodule._target_}>")
-    datamodule: LightningDataModule = hydra.utils.instantiate(config.datamodule)
-
-    # Init lightning model
-    log.info(f"Instantiating model <{config.model._target_}>")
-    model: LightningModule = hydra.utils.instantiate(config.model)
 
     # Init lightning callbacks
     callbacks: List[Callback] = []
@@ -60,7 +52,7 @@ def main(config: DictConfig):
                 callbacks.append(hydra.utils.instantiate(cb_conf))
 
     # Init lightning loggers
-    default_log = "tensorboard" if "log" not in config else config.log
+    default_log = "wandb" if "log" not in config else config.log
     logger: List[LightningLoggerBase] = []
     if "logger" in config and config.logger is not None:
         for name, lg_conf in config.logger.items():
@@ -75,7 +67,6 @@ def main(config: DictConfig):
     log.info(f"Instantiating trainer <{config.trainer._target_}>")
 
     ## Check if checkpoint path is specified
-    path_resume = config.trainer.resume_from_checkpoint
     if not os.path.isfile(config.trainer.resume_from_checkpoint):
         log.info("=> No previous checkpoint specified/found. Start fresh training.")
         config.trainer.resume_from_checkpoint = None
@@ -85,6 +76,14 @@ def main(config: DictConfig):
     trainer: Trainer = hydra.utils.instantiate(
         config.trainer, callbacks=callbacks, logger=logger, _convert_="partial"
     )
+
+    # Init lightning datamodule
+    log.info(f"Instantiating datamodule <{config.datamodule._target_}>")
+    datamodule: LightningDataModule = hydra.utils.instantiate(config.datamodule)
+
+    # Init lightning model
+    log.info(f"Instantiating model <{config.model._target_}>")
+    model: LightningModule = hydra.utils.instantiate(config.model, num_gpus=trainer.num_gpus)
 
     # Send some parameters from config to all lightning loggers
     log.info("Logging hyperparameters!")

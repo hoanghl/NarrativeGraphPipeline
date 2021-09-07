@@ -31,6 +31,7 @@ class NarrativeModel(plt.LightningModule):
         path_pretrained,
         path_valid_pred,
         path_train_pred,
+        num_gpus,
     ):
         super().__init__()
         self.la = la
@@ -40,6 +41,7 @@ class NarrativeModel(plt.LightningModule):
         self.path_valid_pred = path_valid_pred
         self.path_train_pred = path_train_pred
         self.n_training_steps = size_dataset_train // batch_size * max_epochs
+        self.num_gpus = num_gpus
         self.bert_tokenizer = BertTokenizer.from_pretrained(path_pretrained)
 
         #############################
@@ -70,68 +72,64 @@ class NarrativeModel(plt.LightningModule):
     def get_prediction(self, pairs):
         pairs = [
             {
-                "pred": " ".join(self.bert_tokenizer.convert_ids_to_tokens(pair["pred"])),
-                "trg": " ".join(self.bert_tokenizer.convert_ids_to_tokens(pair["trg"])),
+                "pred": " ".join(self.bert_tokenizer.convert_ids_to_tokens(pred)),
+                "trg": " ".join(self.bert_tokenizer.convert_ids_to_tokens(trg)),
             }
-            for pair in pairs
+            for pred, trg in zip(pairs["pred"], pairs["trg"])
         ]
 
         return pairs
 
     def training_step(self, batch, batch_idx):
         loss, logist = self.model.do_train(
-            batch["q_ids"], batch["c_ids"], batch["a1_ids"], batch["a2_ids"], batch["c_masks"]
+            batch["q_ids"],
+            batch["c_ids"],
+            batch["a1_ids"],
+            batch["a2_ids"],
+            batch["c_masks"],
+            use_2_answers=True,
         )
         # output_mle: [b, la + 2, d_vocab]
         self.log("train/loss_step", loss)
 
         logist = [torch.argmax(logist_, dim=-1) for logist_ in logist]
-        trgs = [batch["a1_ids"], batch["a2_ids"]] if len(logist) > 1 else [batch["a1_ids"]]
+        trgs_ = [batch["a1_ids"], batch["a2_ids"]] if len(logist) > 1 else [batch["a1_ids"]]
 
         bz = batch["q_ids"].size(0)
-        preds = []
+        preds, trgs = [], []
         for i in range(bz):
-            for output, trg in zip(logist, trgs):
-                preds.append(
-                    {
-                        "pred": output[i],
-                        "trg": trg[i],
-                    }
-                )
+            for output, trg in zip(logist, trgs_):
+                preds.append(output[i])
+                trgs.append(trg[i])
 
-        return {"loss": loss, "prediction": preds}
+        return {"loss": loss, "pred": preds, "trg": trgs}
+
+    def training_step_end(self, batch_parts):
+        preds, trgs = [], []
+        for pred, trg in zip(batch_parts["pred"], batch_parts["trg"]):
+            preds.extend(pred.view(self.num_gpus, -1))
+            trgs.extend(trg.view(self.num_gpus, -1))
+
+        return {"loss": batch_parts["loss"].mean(), "pred": preds, "trg": trgs}
 
     def training_epoch_end(self, outputs) -> None:
-        outputs = self.all_gather(outputs)
+        outputs = outputs[0]
 
-        if self.trainer.is_global_zero:
-            ## Calculate mean loss
-            loss = torch.cat([output["loss"].unsqueeze(0) for output in outputs]).mean()
-            self.log("train/loss_epoch", loss, rank_zero_only=True)
+        ## Calculate mean loss
+        self.log("train/loss_epoch", outputs["loss"])
 
-            ## Calculate B-1, B-4, METEOR and ROUGE-L
-            output_ = []
-            for output in outputs:
-                output_.extend(output["prediction"])
-            outputs = []
-            for output in output_:
-                if len(output["pred"].size()) == 2:
-                    for b in range(output["pred"].size(0)):
-                        outputs.append({"pred": output["pred"][b], "trg": output["trg"][b]})
-                else:
-                    outputs.append(output)
+        ## Calculate B-1, B-4, METEOR and ROUGE-L
+        outputs = self.get_prediction(outputs)
 
-            outputs = self.get_prediction(outputs)
+        with open(self.path_train_pred, "a+") as pred_file:
+            json.dump(outputs, pred_file, indent=2, ensure_ascii=False)
 
-            with open(self.path_train_pred, "a+") as pred_file:
-                json.dump(outputs, pred_file, indent=2, ensure_ascii=False)
+        bleu_1, bleu_4, meteor, rouge_l = get_scores(outputs)
 
-            bleu_1, bleu_4, meteor, rouge_l = get_scores(outputs)
-
-            self.log("train/bleu_1", bleu_1, rank_zero_only=True)
-            self.log("train/bleu_4", bleu_4, rank_zero_only=True)
-            self.log("train/meteor", meteor, rank_zero_only=True)
-            self.log("train/rouge_l", rouge_l, rank_zero_only=True)
+        self.log("train/bleu_1", bleu_1)
+        self.log("train/bleu_4", bleu_4)
+        self.log("train/meteor", meteor)
+        self.log("train/rouge_l", rouge_l)
 
     def test_step(self, batch, batch_idx):
         return None
@@ -141,35 +139,27 @@ class NarrativeModel(plt.LightningModule):
         # logist: [b, la]
 
         logist = [logist, logist]
-        trgs = [batch["a1_ids"], batch["a2_ids"]]
+        trgs_ = [batch["a1_ids"], batch["a2_ids"]]
 
         bz = batch["q_ids"].size(0)
-        preds = []
+        preds, trgs = [], []
         for i in range(bz):
-            for output, trg in zip(logist, trgs):
-                preds.append(
-                    {
-                        "pred": output[i].cpu().detach().numpy(),
-                        "trg": trg[i].cpu().detach().numpy(),
-                    }
-                )
+            for output, trg in zip(logist, trgs_):
+                preds.append(output[i])
+                trgs.append(trg[i])
 
-        return {"prediction": preds}
+        return {"pred": preds, "trg": trgs}
+
+    def validation_step_end(self, batch_parts):
+        preds, trgs = [], []
+        for pred, trg in zip(batch_parts["pred"], batch_parts["trg"]):
+            preds.extend(pred.view(self.num_gpus, -1))
+            trgs.extend(trg.view(self.num_gpus, -1))
+
+        return {"pred": preds, "trg": trgs}
 
     def validation_epoch_end(self, outputs) -> None:
-        outputs = self.all_gather(outputs)
-
-        ## Calculate B-1, B-4, METEOR and ROUGE-L
-        output_ = []
-        for output in outputs:
-            output_.extend(output["prediction"])
-        outputs = []
-        for output in output_:
-            if len(output["pred"].size()) == 2:
-                for b in range(output["pred"].size(0)):
-                    outputs.append({"pred": output["pred"][b], "trg": output["trg"][b]})
-            else:
-                outputs.append(output)
+        outputs = outputs[0]
 
         outputs = self.get_prediction(outputs)
 
@@ -179,10 +169,10 @@ class NarrativeModel(plt.LightningModule):
         bleu_1, bleu_4, meteor, rouge_l = get_scores(outputs)
 
         # if self.trainer.is_global_zero:
-        self.log("valid/bleu_1", bleu_1, sync_dist=True)
-        self.log("valid/bleu_4", bleu_4, sync_dist=True)
-        self.log("valid/meteor", meteor, sync_dist=True)
-        self.log("valid/rouge_l", rouge_l, sync_dist=True)
+        self.log("valid/bleu_1", bleu_1)
+        self.log("valid/bleu_4", bleu_4)
+        self.log("valid/meteor", meteor)
+        self.log("valid/rouge_l", rouge_l)
 
     def configure_optimizers(self):
         no_decay = ["bias", "LayerNorm.weight"]
