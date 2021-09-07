@@ -1,5 +1,9 @@
 ### This file contains changes and modifications during developing.
 
+## Sep 7, 17:04
+
+- Apply **DP** instead of old **DDP** for _multi training_
+
 ## Sep 5, 16:04
 
 - Remove _q_memory_ component

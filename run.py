@@ -43,14 +43,6 @@ def main(config: DictConfig):
     utils.extras(config)
     utils.print_config(config, resolve=True)
 
-    # Init lightning datamodule
-    log.info(f"Instantiating datamodule <{config.datamodule._target_}>")
-    datamodule: LightningDataModule = hydra.utils.instantiate(config.datamodule)
-
-    # Init lightning model
-    log.info(f"Instantiating model <{config.model._target_}>")
-    model: LightningModule = hydra.utils.instantiate(config.model)
-
     # Init lightning callbacks
     callbacks: List[Callback] = []
     if "callbacks" in config and config.callbacks is not None:
@@ -75,7 +67,7 @@ def main(config: DictConfig):
     log.info(f"Instantiating trainer <{config.trainer._target_}>")
 
     ## Check if checkpoint path is specified
-    path_resume = config.trainer.resume_from_checkpoint
+
     if not os.path.isfile(config.trainer.resume_from_checkpoint):
         log.info("=> No previous checkpoint specified/found. Start fresh training.")
         config.trainer.resume_from_checkpoint = None
@@ -85,6 +77,14 @@ def main(config: DictConfig):
     trainer: Trainer = hydra.utils.instantiate(
         config.trainer, callbacks=callbacks, logger=logger, _convert_="partial"
     )
+
+    # Init lightning datamodule
+    log.info(f"Instantiating datamodule <{config.datamodule._target_}>")
+    datamodule: LightningDataModule = hydra.utils.instantiate(config.datamodule)
+
+    # Init lightning model
+    log.info(f"Instantiating model <{config.model._target_}>")
+    model: LightningModule = hydra.utils.instantiate(config.model, num_gpus=trainer.num_gpus)
 
     # Send some parameters from config to all lightning loggers
     log.info("Logging hyperparameters!")
