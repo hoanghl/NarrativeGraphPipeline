@@ -91,7 +91,7 @@ PATH:
 mode: train # There are 4 modes: train, predict, debug_train and debug_predict
 multigpu: False
 
-batch_size: 5
+batch_size: 8
 
 lq: 33
 lc: 178
