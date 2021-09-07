@@ -38,14 +38,6 @@ def main(config: DictConfig):
 
     log.info("########### Start tuning! ###########")
 
-    # Init lightning datamodule
-    log.info(f"Instantiating datamodule <{config.datamodule._target_}>")
-    datamodule: LightningDataModule = hydra.utils.instantiate(config.datamodule)
-
-    # Init lightning model
-    log.info(f"Instantiating model <{config.model._target_}>")
-    model: LightningModule = hydra.utils.instantiate(config.model, tuning=config.tuning)
-
     # Init lightning loggers
     default_log = "tensorboard" if "log" not in config else config.log
     logger: List[LightningLoggerBase] = []
@@ -70,6 +62,14 @@ def main(config: DictConfig):
     config.trainer.resume_from_checkpoint = None
     trainer: Trainer = hydra.utils.instantiate(config.trainer, logger=logger, _convert_="partial")
 
+    # Init lightning datamodule
+    log.info(f"Instantiating datamodule <{config.datamodule._target_}>")
+    datamodule: LightningDataModule = hydra.utils.instantiate(config.datamodule)
+
+    # Init lightning model
+    log.info(f"Instantiating model <{config.model._target_}>")
+    model: LightningModule = hydra.utils.instantiate(config.model, num_gpus=trainer.num_gpus)
+
     # Send some parameters from config to all lightning loggers
     log.info("Logging hyperparameters!")
     utils.log_hyperparameters(
@@ -83,7 +83,6 @@ def main(config: DictConfig):
 
     # Train the model
     log.info("Starting training!")
-    # FIXME: Uncomment the following
     trainer.fit(model=model, datamodule=datamodule)
 
     log.info("Starting predicting!")
