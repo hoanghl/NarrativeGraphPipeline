@@ -126,13 +126,22 @@ class NarrativeModel(plt.LightningModule):
                 preds.append(output[i])
                 trgs.append(trg[i])
 
-        return {"loss": loss, "pred": preds, "trg": trgs}
+        return {
+            "loss": loss,
+            "pred": preds,
+            "trg": trgs,
+            "size_pred": logist[0].size(-1),
+            "size_trg": trgs_[0].size(-1),
+        }
 
     def training_step_end(self, batch_parts):
+        size_pred = batch_parts["size_pred"][0]
+        size_trg = batch_parts["size_trg"][0]
+
         preds, trgs = [], []
         for pred, trg in zip(batch_parts["pred"], batch_parts["trg"]):
-            preds.extend(pred.view(self.num_gpus, -1))
-            trgs.extend(trg.view(self.num_gpus, -1))
+            preds.extend(pred.view(-1, size_pred).cpu().detach())
+            trgs.extend(trg.view(-1, size_trg).cpu().detach())
 
         return {"loss": batch_parts["loss"].mean(), "pred": preds, "trg": trgs}
 
@@ -175,13 +184,21 @@ class NarrativeModel(plt.LightningModule):
                 preds.append(output[i])
                 trgs.append(trg[i])
 
-        return {"pred": preds, "trg": trgs}
+        return {
+            "pred": preds,
+            "trg": trgs,
+            "size_pred": logist[0].size(-1),
+            "size_trg": trgs_[0].size(-1),
+        }
 
     def validation_step_end(self, batch_parts):
+        size_pred = batch_parts["size_pred"][0]
+        size_trg = batch_parts["size_trg"][0]
+
         preds, trgs = [], []
         for pred, trg in zip(batch_parts["pred"], batch_parts["trg"]):
-            preds.extend(pred.view(self.num_gpus, -1))
-            trgs.extend(trg.view(self.num_gpus, -1))
+            preds.extend(pred.view(-1, size_pred).cpu().detach())
+            trgs.extend(trg.view(-1, size_trg).cpu().detach())
 
         return {"pred": preds, "trg": trgs}
 

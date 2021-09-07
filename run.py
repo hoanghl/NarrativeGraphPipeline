@@ -37,7 +37,7 @@ def main(config: DictConfig):
     if config.multigpu is True:
         config.trainer.precision = 32
         config.trainer.gpus = -1
-        config.trainer.accelerator = "ddp"
+        config.trainer.accelerator = "dp"
         config.trainer.replace_sampler_ddp = True
 
     utils.extras(config)
@@ -77,14 +77,6 @@ def main(config: DictConfig):
     trainer: Trainer = hydra.utils.instantiate(
         config.trainer, callbacks=callbacks, logger=logger, _convert_="partial"
     )
-
-    # Init lightning datamodule
-    log.info(f"Instantiating datamodule <{config.datamodule._target_}>")
-    datamodule: LightningDataModule = hydra.utils.instantiate(config.datamodule)
-
-    # Init lightning model
-    log.info(f"Instantiating model <{config.model._target_}>")
-    model: LightningModule = hydra.utils.instantiate(config.model, num_gpus=trainer.num_gpus)
 
     # Send some parameters from config to all lightning loggers
     log.info("Logging hyperparameters!")
