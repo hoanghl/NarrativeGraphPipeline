@@ -31,7 +31,6 @@ class NarrativeModel(plt.LightningModule):
         path_pretrained,
         path_valid_pred,
         path_train_pred,
-        num_gpus,
     ):
         super().__init__()
         self.la = la
@@ -41,7 +40,6 @@ class NarrativeModel(plt.LightningModule):
         self.path_valid_pred = path_valid_pred
         self.path_train_pred = path_train_pred
         self.n_training_steps = size_dataset_train // batch_size * max_epochs
-        self.num_gpus = num_gpus
         self.bert_tokenizer = BertTokenizer.from_pretrained(path_pretrained)
 
         #############################
@@ -92,8 +90,8 @@ class NarrativeModel(plt.LightningModule):
         # output_mle: [b, la + 2, d_vocab]
         self.log("train/loss_step", loss)
 
-        logist = [torch.argmax(logist_, dim=-1) for logist_ in logist]
-        trgs_ = [batch["a1_ids"], batch["a2_ids"]] if len(logist) > 1 else [batch["a1_ids"]]
+        logist = [torch.argmax(logist, dim=-1)]
+        trgs_ = [batch["a1_ids"]]
 
         bz = batch["q_ids"].size(0)
         preds, trgs = [], []

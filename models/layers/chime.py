@@ -99,13 +99,7 @@ class CHIME(torch_nn.Module):
         return edge_indx
 
     def _get_loss(self, output_mle, trgs):
-        loss = 0
-        for output, trg in zip(output_mle, trgs):
-            loss += self.criterion(output.transpose(-1, -2), trg)
-
-        loss /= len(output_mle)
-
-        return loss
+        return self.criterion(output_mle.transpose(-1, -2), trgs)
 
     def _get_padding_mask(self, qca_ids, sen_1_leng):
         s_l = qca_ids.size(0)
@@ -297,13 +291,7 @@ class CHIME(torch_nn.Module):
         edge_index = self._get_edge_index(c_masks)
         # [b, 2, n_edges]
 
-        output_mle, trgs = [], []
-        ans = [a1, a2] if use_2_answers else [a1]
-        for a in ans:
-            output, trg = self(q, c, a, edge_index)
-
-            output_mle.append(output)
-            trgs.append(trg)
+        output_mle, trgs = self(q, c, a1, edge_index)
 
         loss = self._get_loss(output_mle, trgs)
 
