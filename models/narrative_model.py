@@ -109,8 +109,16 @@ class NarrativeModel(plt.LightningModule):
         }
 
     def training_step_end(self, batch_parts):
-        size_pred = batch_parts["size_pred"][0]
-        size_trg = batch_parts["size_trg"][0]
+        size_pred = (
+            batch_parts["size_pred"]
+            if isinstance(batch_parts["size_pred"], int)
+            else batch_parts["size_pred"][0]
+        )
+        size_trg = (
+            batch_parts["size_trg"]
+            if isinstance(batch_parts["size_trg"], int)
+            else batch_parts["size_trg"][0]
+        )
 
         preds, trgs = [], []
         for pred, trg in zip(batch_parts["pred"], batch_parts["trg"]):
@@ -163,8 +171,16 @@ class NarrativeModel(plt.LightningModule):
         }
 
     def validation_step_end(self, batch_parts):
-        size_pred = batch_parts["size_pred"][0]
-        size_trg = batch_parts["size_trg"][0]
+        size_pred = (
+            batch_parts["size_pred"]
+            if isinstance(batch_parts["size_pred"], int)
+            else batch_parts["size_pred"][0]
+        )
+        size_trg = (
+            batch_parts["size_trg"]
+            if isinstance(batch_parts["size_trg"], int)
+            else batch_parts["size_trg"][0]
+        )
 
         preds, trgs = [], []
         for pred, trg in zip(batch_parts["pred"], batch_parts["trg"]):
