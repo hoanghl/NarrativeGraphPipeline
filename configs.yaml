@@ -93,10 +93,10 @@ multigpu: False
 
 batch_size: 5
 
-lq: 33
-lc: 178
+lq: 35 # sequence length of query (question)
+lc: 180 # sequence length of each para of context
 nc: 10
-la: 10
+la: 12 # sequence length of answer
 sizes_dataset:
   train: 32747
   test: 10557

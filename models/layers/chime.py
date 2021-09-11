@@ -23,7 +23,6 @@ class CHIME(torch_nn.Module):
         dropout,
         n_propagations,
         path_pretrained,
-        criterion,
     ):
         super().__init__()
 
@@ -47,7 +46,6 @@ class CHIME(torch_nn.Module):
         self.gate_a = torch_nn.Sequential(torch_nn.Linear(d_bert * 2, 1), torch_nn.Sigmoid())
         self.decoder = torch_nn.Linear(d_bert, d_vocab)
 
-        self.criterion = criterion
         ## Init
         self.decoder.weight = self.encoder.embeddings.word_embeddings.weight
         self.decoder.bias.data.zero_()
@@ -59,7 +57,7 @@ class CHIME(torch_nn.Module):
     # l_qc = 1 + lq + 1 + lc + 1
     # l_qca = 1 + lq + 1 + lc + 1 + la + 1
 
-    def _get_edge_index(self, c_masks):
+    def get_edge_index(self, c_masks):
         def gen_edges(c_mask):
             # c_masks: [nc, lc]
             nc = c_mask.size(0)
@@ -97,9 +95,6 @@ class CHIME(torch_nn.Module):
         edge_indx = torch.cat(edge_indx, dim=0).type_as(c_masks)
 
         return edge_indx
-
-    def _get_loss(self, output_mle, trgs):
-        return self.criterion(output_mle.transpose(-1, -2), trgs)
 
     def _get_padding_mask(self, qca_ids, sen_1_leng):
         s_l = qca_ids.size(0)
@@ -234,7 +229,7 @@ class CHIME(torch_nn.Module):
         part1, part2, c_hid = [], [], []
         for n in range(nc):
             # From q, c and a, create id, mask and tok_type_id tensors
-            qca_ids, qca_masks, qca_tok_type_id, trg, lq_np, lc_np, la_np = self.create_misc(
+            qca_ids, qca_masks, qca_tok_type_id, trgs, lq_np, lc_np, la_np = self.create_misc(
                 q, c[:, n], a
             )
 
@@ -285,22 +280,18 @@ class CHIME(torch_nn.Module):
         output_mle = self.decoder(a_mem)
         # [b, la + 2, d_vocab]
 
-        return output_mle, trg
+        return output_mle.transpose(1, 2), trgs
 
-    def do_train(self, q, c, a1, a2, c_masks, use_2_answers=False):
-        edge_index = self._get_edge_index(c_masks)
+    def do_train(self, q, c, a, c_masks):
+        edge_index = self.get_edge_index(c_masks)
         # [b, 2, n_edges]
 
-        output_mle, trgs = self(q, c, a1, edge_index)
-
-        loss = self._get_loss(output_mle, trgs)
-
-        return loss, output_mle
+        return self(q, c, a, edge_index)
 
     def do_predict(self, q, c, c_masks, la):
         bz = q.size(0)
 
-        edge_index = self._get_edge_index(c_masks)
+        edge_index = self.get_edge_index(c_masks)
         # [b, 2, n_edges]
 
         ans = []

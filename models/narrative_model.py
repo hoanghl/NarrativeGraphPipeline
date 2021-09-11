@@ -56,12 +56,12 @@ class NarrativeModel(plt.LightningModule):
             dropout=dropout,
             n_propagations=n_propagations,
             path_pretrained=path_pretrained,
-            criterion=torch_nn.CrossEntropyLoss(ignore_index=self.bert_tokenizer.pad_token_id),
         )
 
         #############################
         # Define things
         #############################
+        self.criterion = torch_nn.CrossEntropyLoss(ignore_index=self.bert_tokenizer.pad_token_id)
 
     ####################################################################
     # FOR TRAINING PURPOSE
@@ -79,18 +79,18 @@ class NarrativeModel(plt.LightningModule):
         return pairs
 
     def training_step(self, batch, batch_idx):
-        loss, logist = self.model.do_train(
-            batch["q_ids"],
-            batch["c_ids"],
-            batch["a1_ids"],
-            batch["a2_ids"],
-            batch["c_masks"],
-            use_2_answers=True,
+        output_mle, trgs = self.model.do_train(
+            batch["q_ids"], batch["c_ids"], batch["a1_ids"], batch["c_masks"]
         )
-        # output_mle: [b, la + 2, d_vocab]
-        self.log("train/loss_step", loss)
+        # trgs: [b, la + 1]
+        # output_mle: [b, d_vocab, la + 1]
 
-        logist = [torch.argmax(logist, dim=-1)]
+        loss = self.criterion(output_mle, trgs)
+        self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=False)
+
+        # output_mle: [b, la + 2, d_vocab]
+
+        logist = [torch.argmax(output_mle, dim=1)]
         trgs_ = [batch["a1_ids"]]
 
         bz = batch["q_ids"].size(0)
@@ -142,10 +142,10 @@ class NarrativeModel(plt.LightningModule):
         return None
 
     def validation_step(self, batch, batch_idx):
-        logist = self.model.do_predict(batch["q_ids"], batch["c_ids"], batch["c_masks"], self.la)
+        pred = self.model.do_predict(batch["q_ids"], batch["c_ids"], batch["c_masks"], self.la)
         # logist: [b, la]
 
-        logist = [logist, logist]
+        logist = [pred, pred]
         trgs_ = [batch["a1_ids"], batch["a2_ids"]]
 
         bz = batch["q_ids"].size(0)
