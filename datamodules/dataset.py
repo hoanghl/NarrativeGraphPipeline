@@ -19,7 +19,7 @@ class NarrativeDataset(Dataset):
         self.c_masks = []
 
         self.exchange_rate = 0.5
-
+        path_data = "/home/ubuntu/NarrativeGraph/example_71.parquet"
         self.read_datasetfile(path_data, split)
 
     def __len__(self) -> int:
@@ -42,21 +42,21 @@ class NarrativeDataset(Dataset):
         df = pd.read_parquet(path_data.replace("[SPLIT]", split))
 
         for entry in df.itertuples():
-            self.q_ids.append(np.copy(entry.q_ids))
-            self.a1_ids.append(np.copy(entry.a1_ids))
-            self.a2_ids.append(np.copy(entry.a2_ids))
-
-            c_E_ids = np.copy(np.reshape(entry.c_E_ids, (-1, self.lc)))
-            c_E_masks = np.copy(np.reshape(entry.c_E_masks, (-1, self.lc)))
-            c_H_ids = np.copy(np.reshape(entry.c_H_ids, (-1, self.lc)))
-            c_H_masks = np.copy(np.reshape(entry.c_H_masks, (-1, self.lc)))
+            q = entry.q_ids[(entry.q_ids != 101) & (entry.q_ids != 102)]
+            a1 = entry.a1_ids[(entry.a1_ids != 101) & (entry.a1_ids != 102)]
+            a2 = entry.a1_ids[(entry.a1_ids != 101) & (entry.a1_ids != 102)]
+            c_E_ids = entry.c_E_ids[(entry.c_E_ids != 101) & (entry.c_E_ids != 102)]
+            c_E_ids = np.reshape(c_E_ids, (-1, self.lc))
+            c_H_ids = entry.c_H_ids[(entry.c_H_ids != 101) & (entry.c_H_ids != 102)]
+            c_H_ids = np.reshape(c_H_ids, (-1, self.lc))
+            c_E_masks = np.reshape(entry.c_E_masks, (-1, self.lc + 2))[:, 2:]
+            c_H_masks = np.reshape(entry.c_H_masks, (-1, self.lc + 2))[:, 2:]
 
             c_ids = np.zeros((self.nc, self.lc), dtype=int)
             c_masks = np.zeros((self.nc, self.lc), dtype=int)
 
             n_samples = c_E_ids.shape[0]
             if split == "train":
-
                 ratio_Hn = int(n_samples * self.exchange_rate)
                 indices_Hn = sample(range(n_samples), ratio_Hn)
                 c_H_ids = c_H_ids[indices_Hn]
@@ -74,6 +74,9 @@ class NarrativeDataset(Dataset):
                 c_ids[:n_samples] = c_H_ids
                 c_masks[:n_samples] = c_H_masks
 
+            self.q_ids.append(np.copy(q))
+            self.a1_ids.append(np.copy(a1))
+            self.a2_ids.append(np.copy(a2))
             self.c_ids.append(c_ids)
             self.c_masks.append(c_masks)
 

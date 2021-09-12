@@ -91,12 +91,12 @@ PATH:
 mode: train # There are 4 modes: train, predict, debug_train and debug_predict
 multigpu: False
 
-batch_size: 5
+batch_size: 4
 
-lq: 35 # sequence length of query (question)
-lc: 180 # sequence length of each para of context
+lq: 33
+lc: 178
 nc: 10
-la: 12 # sequence length of answer
+la: 10
 sizes_dataset:
   train: 32747
   test: 10557
@@ -142,6 +142,7 @@ model:
   path_pretrained: ${PATH.pretrained}
   path_train_pred: ${PATH.train_pred}
   path_valid_pred: ${PATH.valid_pred}
+  use_2_answers: False
 
 datamodule:
   _target_: datamodules.narrative_datamodule.NarrativeDataModule

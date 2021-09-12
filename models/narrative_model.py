@@ -31,6 +31,7 @@ class NarrativeModel(plt.LightningModule):
         path_pretrained,
         path_valid_pred,
         path_train_pred,
+        use_2_answers,
     ):
         super().__init__()
         self.la = la
@@ -40,6 +41,7 @@ class NarrativeModel(plt.LightningModule):
         self.path_valid_pred = path_valid_pred
         self.path_train_pred = path_train_pred
         self.n_training_steps = size_dataset_train // batch_size * max_epochs
+        self.use_2_answers = use_2_answers
         self.bert_tokenizer = BertTokenizer.from_pretrained(path_pretrained)
 
         #############################
@@ -56,12 +58,8 @@ class NarrativeModel(plt.LightningModule):
             dropout=dropout,
             n_propagations=n_propagations,
             path_pretrained=path_pretrained,
+            criterion=torch_nn.CrossEntropyLoss(ignore_index=self.bert_tokenizer.pad_token_id),
         )
-
-        #############################
-        # Define things
-        #############################
-        self.criterion = torch_nn.CrossEntropyLoss(ignore_index=self.bert_tokenizer.pad_token_id)
 
     ####################################################################
     # FOR TRAINING PURPOSE
@@ -79,19 +77,19 @@ class NarrativeModel(plt.LightningModule):
         return pairs
 
     def training_step(self, batch, batch_idx):
-        output_mle, trgs = self.model.do_train(
-            batch["q_ids"], batch["c_ids"], batch["a1_ids"], batch["c_masks"]
+        loss, logist = self.model.do_train(
+            batch["q_ids"],
+            batch["c_ids"],
+            batch["a1_ids"],
+            batch["a2_ids"],
+            batch["c_masks"],
+            use_2_answers=False,
         )
-        # trgs: [b, la + 1]
-        # output_mle: [b, d_vocab, la + 1]
-
-        loss = self.criterion(output_mle, trgs)
+        # output_mle: [b, la + 2, d_vocab]
         self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=False)
 
-        # output_mle: [b, la + 2, d_vocab]
-
-        logist = [torch.argmax(output_mle, dim=1)]
-        trgs_ = [batch["a1_ids"]]
+        logist = [torch.argmax(logist_, dim=-1) for logist_ in logist]
+        trgs_ = [batch["a1_ids"], batch["a2_ids"]] if self.use_2_answers else [batch["a1_ids"]]
 
         bz = batch["q_ids"].size(0)
         preds, trgs = [], []
@@ -128,10 +126,13 @@ class NarrativeModel(plt.LightningModule):
         return {"loss": batch_parts["loss"].mean(), "pred": preds, "trg": trgs}
 
     def training_epoch_end(self, outputs) -> None:
-        outputs = outputs[0]
-
-        ## Calculate mean loss
-        self.log("train/loss_epoch", outputs["loss"])
+        pairs = {"pred": [], "trg": []}
+        loss = 0
+        for output in outputs:
+            pairs["pred"].extend(output["pred"])
+            pairs["trg"].extend(output["trg"])
+            loss += output["loss"]
+        outputs = pairs
 
         ## Calculate B-1, B-4, METEOR and ROUGE-L
         outputs = self.get_prediction(outputs)
@@ -141,6 +142,7 @@ class NarrativeModel(plt.LightningModule):
 
         bleu_1, bleu_4, meteor, rouge_l = get_scores(outputs)
 
+        self.log("train/n_samples", len(pairs["pred"]))
         self.log("train/bleu_1", bleu_1)
         self.log("train/bleu_4", bleu_4)
         self.log("train/meteor", meteor)
@@ -150,11 +152,11 @@ class NarrativeModel(plt.LightningModule):
         return None
 
     def validation_step(self, batch, batch_idx):
-        pred = self.model.do_predict(batch["q_ids"], batch["c_ids"], batch["c_masks"], self.la)
+        logist = self.model.do_predict(batch["q_ids"], batch["c_ids"], batch["c_masks"], self.la)
         # logist: [b, la]
 
-        logist = [pred, pred]
-        trgs_ = [batch["a1_ids"], batch["a2_ids"]]
+        logist = [logist, logist] if self.use_2_answers else [logist]
+        trgs_ = [batch["a1_ids"], batch["a2_ids"]] if self.use_2_answers else [batch["a1_ids"]]
 
         bz = batch["q_ids"].size(0)
         preds, trgs = [], []
@@ -190,7 +192,11 @@ class NarrativeModel(plt.LightningModule):
         return {"pred": preds, "trg": trgs}
 
     def validation_epoch_end(self, outputs) -> None:
-        outputs = outputs[0]
+        pairs = {"pred": [], "trg": []}
+        for output in outputs:
+            pairs["pred"].extend(output["pred"])
+            pairs["trg"].extend(output["trg"])
+        outputs = pairs
 
         outputs = self.get_prediction(outputs)
 
@@ -199,7 +205,7 @@ class NarrativeModel(plt.LightningModule):
 
         bleu_1, bleu_4, meteor, rouge_l = get_scores(outputs)
 
-        # if self.trainer.is_global_zero:
+        self.log("valid/n_samples", len(pairs["pred"]))
         self.log("valid/bleu_1", bleu_1)
         self.log("valid/bleu_4", bleu_4)
         self.log("valid/meteor", meteor)
