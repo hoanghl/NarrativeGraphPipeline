@@ -19,7 +19,6 @@ class NarrativeDataset(Dataset):
         self.c_masks = []
 
         self.exchange_rate = 0.5
-        path_data = "/home/ubuntu/NarrativeGraph/example_71.parquet"
         self.read_datasetfile(path_data, split)
 
     def __len__(self) -> int:
