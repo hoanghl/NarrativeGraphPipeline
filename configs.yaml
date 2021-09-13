@@ -49,7 +49,7 @@ hydra:
     search_space:
       batch_size:
         type: categorical
-        choices: [5, 8, 10]
+        choices: [4, 6, 8]
       model.w_decay:
         type: float
         low: 2e-2
@@ -78,6 +78,9 @@ hydra:
         type: float
         low: 0.1
         high: 0.25
+      model.use_2_answers:
+        type: categorical
+        choices: [True, False]
 
 ##################################
 ## CONFIGURATIONS for components
@@ -113,7 +116,7 @@ trainer:
   accelerator: null
   replace_sampler_ddp: False
   min_epochs: 1
-  max_epochs: 60
+  max_epochs: 50
   auto_lr_find: False
   terminate_on_nan: True
   log_every_n_steps: 40
@@ -146,9 +149,10 @@ model:
   max_epochs: ${trainer.max_epochs}
   warmup_rate: 0.2
   path_pretrained: ${PATH.pretrained}
-  path_pred: ${PATH.log}/pred.json
+  path_test_pred: ${PATH.log}/pred.json
   path_train_pred: ${PATH.log}/train_pred.json
   path_valid_pred: ${PATH.log}/valid_pred.json
+  use_2_answers: False
 
 datamodule:
   _target_: datamodules.narrative_datamodule.NarrativeDataModule
@@ -187,7 +191,7 @@ logger:
   wandb:
     _target_: pytorch_lightning.loggers.wandb.WandbLogger
     project: "narrative_weam"
-    name: ${now:%A %b-%d %H:%M}
+    name: ${now:%A %b-%d %H:%M}_tune
     save_dir: "."
     offline: False # set True to store all logs only locally
     id: null # pass correct id to resume experiment!
