@@ -31,7 +31,9 @@ class NarrativeModel(plt.LightningModule):
         path_pretrained,
         path_valid_pred,
         path_train_pred,
+        path_test_pred,
         use_2_answers,
+        is_tuning=False,
     ):
         super().__init__()
         self.la = la
@@ -40,8 +42,10 @@ class NarrativeModel(plt.LightningModule):
         self.warmup_rate = warmup_rate
         self.path_valid_pred = path_valid_pred
         self.path_train_pred = path_train_pred
+        self.path_test_pred = path_test_pred
         self.n_training_steps = size_dataset_train // batch_size * max_epochs
         self.use_2_answers = use_2_answers
+        self.is_tuning = is_tuning
         self.bert_tokenizer = BertTokenizer.from_pretrained(path_pretrained)
 
         #############################
@@ -60,6 +64,40 @@ class NarrativeModel(plt.LightningModule):
             path_pretrained=path_pretrained,
             criterion=torch_nn.CrossEntropyLoss(ignore_index=self.bert_tokenizer.pad_token_id),
         )
+
+    def configure_optimizers(self):
+        no_decay = ["bias", "LayerNorm.weight"]
+        params_decay, params_nodecay = [], []
+
+        for n, p in self.model.named_parameters():
+            if not any(nd in n for nd in no_decay):
+                params_decay.append(p)
+            else:
+                params_nodecay.append(p)
+
+        optimizer_grouped_parameters = [
+            {
+                "params": params_decay,
+                "weight_decay": self.w_decay,
+            },
+            {
+                "params": params_nodecay,
+                "weight_decay": 0.0,
+            },
+        ]
+        optimizer = AdamW(params=optimizer_grouped_parameters, lr=self.lr)
+
+        lr_scheduler = {
+            "scheduler": get_linear_schedule_with_warmup(
+                optimizer,
+                num_warmup_steps=int(self.n_training_steps * self.warmup_rate),
+                num_training_steps=self.n_training_steps,
+            ),
+            "name": "learning_rate",
+            "interval": "step",
+            "frequency": 1,
+        }
+        return [optimizer], [lr_scheduler]
 
     ####################################################################
     # FOR TRAINING PURPOSE
@@ -86,7 +124,9 @@ class NarrativeModel(plt.LightningModule):
             use_2_answers=False,
         )
         # output_mle: [b, la + 2, d_vocab]
-        self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=False)
+
+        if self.is_tuning is True:
+            return {"loss": loss}
 
         logist = [torch.argmax(logist_, dim=-1) for logist_ in logist]
         trgs_ = [batch["a1_ids"], batch["a2_ids"]] if self.use_2_answers else [batch["a1_ids"]]
@@ -107,6 +147,12 @@ class NarrativeModel(plt.LightningModule):
         }
 
     def training_step_end(self, batch_parts):
+        if self.is_tuning is True:
+            loss = batch_parts["loss"].mean()
+            self.log("train/loss", loss, on_step=True, on_epoch=True)
+
+            return {"loss": loss}
+
         size_pred = (
             batch_parts["size_pred"]
             if isinstance(batch_parts["size_pred"], int)
@@ -123,15 +169,19 @@ class NarrativeModel(plt.LightningModule):
             preds.extend(pred.view(-1, size_pred).cpu().detach())
             trgs.extend(trg.view(-1, size_trg).cpu().detach())
 
-        return {"loss": batch_parts["loss"].mean(), "pred": preds, "trg": trgs}
+        loss = batch_parts["loss"].mean()
+        self.log("train/loss", loss, on_step=True, on_epoch=True)
+
+        return {"loss": loss, "pred": preds, "trg": trgs}
 
     def training_epoch_end(self, outputs) -> None:
+        if self.is_tuning is True:
+            return
+
         pairs = {"pred": [], "trg": []}
-        loss = 0
         for output in outputs:
             pairs["pred"].extend(output["pred"])
             pairs["trg"].extend(output["trg"])
-            loss += output["loss"]
         outputs = pairs
 
         ## Calculate B-1, B-4, METEOR and ROUGE-L
@@ -142,14 +192,10 @@ class NarrativeModel(plt.LightningModule):
 
         bleu_1, bleu_4, meteor, rouge_l = get_scores(outputs)
 
-        self.log("train/n_samples", len(pairs["pred"]))
         self.log("train/bleu_1", bleu_1)
         self.log("train/bleu_4", bleu_4)
         self.log("train/meteor", meteor)
         self.log("train/rouge_l", rouge_l)
-
-    def test_step(self, batch, batch_idx):
-        return None
 
     def validation_step(self, batch, batch_idx):
         logist = self.model.do_predict(batch["q_ids"], batch["c_ids"], batch["c_masks"], self.la)
@@ -205,42 +251,67 @@ class NarrativeModel(plt.LightningModule):
 
         bleu_1, bleu_4, meteor, rouge_l = get_scores(outputs)
 
-        self.log("valid/n_samples", len(pairs["pred"]))
         self.log("valid/bleu_1", bleu_1)
         self.log("valid/bleu_4", bleu_4)
         self.log("valid/meteor", meteor)
         self.log("valid/rouge_l", rouge_l)
 
-    def configure_optimizers(self):
-        no_decay = ["bias", "LayerNorm.weight"]
-        params_decay, params_nodecay = [], []
+    def test_step(self, batch, batch_idx):
+        logist = self.model.do_predict(batch["q_ids"], batch["c_ids"], batch["c_masks"], self.la)
+        # logist: [b, la]
 
-        for n, p in self.model.named_parameters():
-            if not any(nd in n for nd in no_decay):
-                params_decay.append(p)
-            else:
-                params_nodecay.append(p)
+        logist = [logist, logist] if self.use_2_answers else [logist]
+        trgs_ = [batch["a1_ids"], batch["a2_ids"]] if self.use_2_answers else [batch["a1_ids"]]
 
-        optimizer_grouped_parameters = [
-            {
-                "params": params_decay,
-                "weight_decay": self.w_decay,
-            },
-            {
-                "params": params_nodecay,
-                "weight_decay": 0.0,
-            },
-        ]
-        optimizer = AdamW(params=optimizer_grouped_parameters, lr=self.lr)
+        bz = batch["q_ids"].size(0)
+        preds, trgs = [], []
+        for i in range(bz):
+            for output, trg in zip(logist, trgs_):
+                preds.append(output[i])
+                trgs.append(trg[i])
 
-        lr_scheduler = {
-            "scheduler": get_linear_schedule_with_warmup(
-                optimizer,
-                num_warmup_steps=int(self.n_training_steps * self.warmup_rate),
-                num_training_steps=self.n_training_steps,
-            ),
-            "name": "learning_rate",
-            "interval": "step",
-            "frequency": 1,
+        return {
+            "pred": preds,
+            "trg": trgs,
+            "size_pred": logist[0].size(-1),
+            "size_trg": trgs_[0].size(-1),
         }
-        return [optimizer], [lr_scheduler]
+
+    def test_step_end(self, batch_parts):
+        size_pred = (
+            batch_parts["size_pred"]
+            if isinstance(batch_parts["size_pred"], int)
+            else batch_parts["size_pred"][0]
+        )
+        size_trg = (
+            batch_parts["size_trg"]
+            if isinstance(batch_parts["size_trg"], int)
+            else batch_parts["size_trg"][0]
+        )
+
+        preds, trgs = [], []
+        for pred, trg in zip(batch_parts["pred"], batch_parts["trg"]):
+            preds.extend(pred.view(-1, size_pred).cpu().detach())
+            trgs.extend(trg.view(-1, size_trg).cpu().detach())
+
+        return {"pred": preds, "trg": trgs}
+
+    def test_epoch_end(self, outputs) -> None:
+        pairs = {"pred": [], "trg": []}
+        for output in outputs:
+            pairs["pred"].extend(output["pred"])
+            pairs["trg"].extend(output["trg"])
+        outputs = pairs
+
+        outputs = self.get_prediction(outputs)
+
+        if not self.is_tuning:
+            with open(self.path_test_pred, "a+") as pred_file:
+                json.dump(outputs, pred_file, indent=2, ensure_ascii=False)
+
+        bleu_1, bleu_4, meteor, rouge_l = get_scores(outputs)
+
+        self.log("bleu_1", bleu_1)
+        self.log("bleu_4", bleu_4)
+        self.log("meteor", meteor)
+        self.log("rouge_l", rouge_l)

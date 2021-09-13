@@ -74,6 +74,9 @@ hydra:
         type: float
         low: 1e-5
         high: 2e-2
+      model.use_2_answers:
+        type: categorical
+        choices: [True, False]
 
 ##################################
 ## CONFIGURATIONS for components
@@ -85,7 +88,7 @@ PATH:
   pretrained: ${PATH.utils}/bert-base-uncased
   train_pred: ${work_dir}/logs/train_pred.json
   valid_pred: ${work_dir}/logs/valid_pred.json
-  pred: ${data_dir}/prediction.json
+  test_pred: ${work_dir}/logs/test_pred.json
   last_best: ${work_dir}/logs/last_best.ckpt
 
 mode: train # There are 4 modes: train, predict, debug_train and debug_predict
@@ -109,7 +112,7 @@ trainer:
   accelerator: null
   replace_sampler_ddp: False
   min_epochs: 1
-  max_epochs: 30
+  max_epochs: 50
   auto_lr_find: False
   terminate_on_nan: True
   log_every_n_steps: 40
@@ -136,12 +139,13 @@ model:
   lr: 1e-5
   w_decay: 0.95
   dropout: 0.15
-  warmup_rate: 0.2
+  warmup_rate: 0.15
   size_dataset_train: ${sizes_dataset.train}
   max_epochs: ${trainer.max_epochs}
   path_pretrained: ${PATH.pretrained}
   path_train_pred: ${PATH.train_pred}
   path_valid_pred: ${PATH.valid_pred}
+  path_test_pred: ${PATH.test_pred}
   use_2_answers: False
 
 datamodule:

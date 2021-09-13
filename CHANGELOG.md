@@ -1,5 +1,10 @@
 ### This file contains changes and modifications during developing.
 
+## Sep 13, 23:22
+- Add module **tune** for tuning
+- Adjust loss logging
+
+
 ## Sep 7, 16:40
 
 - Apply **DP** instead of old **DDP** for _multi training_
