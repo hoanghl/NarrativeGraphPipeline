@@ -221,9 +221,6 @@ class NarrativeModel(plt.LightningModule):
         self.log("train/meteor", meteor)
         self.log("train/rouge_l", rouge_l)
 
-    def test_step(self, batch: Any, batch_idx):
-        return 0
-
     def validation_step(self, batch: Any, batch_idx):
         logist = self.model.do_predict(batch["q_ids"], batch["c_ids"], self.la)
         # logist: [b, la]

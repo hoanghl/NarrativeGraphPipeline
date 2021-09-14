@@ -31,6 +31,9 @@ def main(config: DictConfig):
         config.trainer.replace_sampler_ddp = True
 
     config.trainer.check_val_every_n_epoch = 100
+    if config.logger is not None:
+        config.logger.tensorboard.name = config.logger.tensorboard.name + "_tune"
+        config.logger.wandb.name = config.logger.wandb.name + "_tune"
 
     utils.extras(config)
     utils.print_config(config, resolve=True)
