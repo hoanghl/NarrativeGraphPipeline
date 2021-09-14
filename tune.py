@@ -84,7 +84,7 @@ def main(config: DictConfig):
 
     # Train the model
     log.info("Starting training!")
-    # trainer.fit(model=model, datamodule=datamodule)
+    trainer.fit(model=model, datamodule=datamodule)
 
     log.info("Starting predicting!")
     output = trainer.test(model=model, datamodule=datamodule)
