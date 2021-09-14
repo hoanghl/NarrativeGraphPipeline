@@ -27,12 +27,13 @@ def main(config: DictConfig):
     if config.multigpu is True:
         config.trainer.precision = 32
         config.trainer.gpus = -1
-        config.trainer.accelerator = "ddp"
+        config.trainer.accelerator = "dp"
         config.trainer.replace_sampler_ddp = True
 
     config.trainer.check_val_every_n_epoch = 100
-    config.logger.tensorboard.name = config.logger.tensorboard.name + "_tune"
-    config.logger.wandb.name = config.logger.wandb.name + "_tune"
+    if config.logger is not None:
+        config.logger.tensorboard.name = config.logger.tensorboard.name + "_tune"
+        config.logger.wandb.name = config.logger.wandb.name + "_tune"
 
     utils.extras(config)
     utils.print_config(config, resolve=True)
@@ -83,7 +84,7 @@ def main(config: DictConfig):
 
     # Train the model
     log.info("Starting training!")
-    trainer.fit(model=model, datamodule=datamodule)
+    # trainer.fit(model=model, datamodule=datamodule)
 
     log.info("Starting predicting!")
     output = trainer.test(model=model, datamodule=datamodule)

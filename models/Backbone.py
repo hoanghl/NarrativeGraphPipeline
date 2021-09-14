@@ -121,7 +121,7 @@ class Backbone(torch_nn.Module):
 
         outputs = self.pgn.do_predict(Y, q, c_ids)
 
-        output_mle_ = self.ids2dist(outputs).transpose(-1, -2)
+        output_mle_ = self._ids2dist(outputs).transpose(-1, -2)
         # [b, la, d_vocab]
 
         if use_2_answers:

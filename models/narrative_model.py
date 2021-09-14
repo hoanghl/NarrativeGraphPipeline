@@ -292,9 +292,6 @@ class NarrativeModel(plt.LightningModule):
             preds.extend(pred.view(-1, size_pred).cpu().detach())
             trgs.extend(trg.view(-1, size_trg).cpu().detach())
 
-        loss = batch_parts["loss"].mean()
-        self.log("valid/loss", loss, on_step=False, on_epoch=True)
-
         return {"pred": preds, "trg": trgs}
 
     def test_epoch_end(self, outputs) -> None:
