@@ -30,7 +30,9 @@ class NarrativeModel(plt.LightningModule):
         path_pretrained,
         path_valid_pred,
         path_train_pred,
-        tuning=False,
+        path_test_pred,
+        use_2_answers,
+        is_tuning=False,
     ):
         super().__init__()
 
@@ -41,7 +43,8 @@ class NarrativeModel(plt.LightningModule):
         self.path_valid_pred = path_valid_pred
         self.path_train_pred = path_train_pred
         self.n_training_steps = size_dataset_train // batch_size * max_epochs
-        self.tuning = tuning
+        self.use_2_answers = use_2_answers
+        self.is_tuning = is_tuning
         self.bert_tokenizer = BertTokenizer.from_pretrained(path_pretrained)
 
         #############################
@@ -62,178 +65,6 @@ class NarrativeModel(plt.LightningModule):
             criterion=torch_nn.CrossEntropyLoss(ignore_index=self.bert_tokenizer.pad_token_id),
             device=self.device,
         )
-
-    ####################################################################
-    # FOR TRAINING PURPOSE
-    ####################################################################
-    def get_prediction(self, pairs):
-        pairs = [
-            {
-                "pred": " ".join(self.bert_tokenizer.convert_ids_to_tokens(pair["pred"])),
-                "trg": " ".join(self.bert_tokenizer.convert_ids_to_tokens(pair["trg"])),
-            }
-            for pair in pairs
-        ]
-
-        return pairs
-
-    def training_step(self, batch, batch_idx: int):
-        loss, logist = self.model.do_train(**batch)
-        # logist: list of [b, la, d_vocab]
-
-        self.log("train/loss_step", loss, on_step=True, on_epoch=False, prog_bar=False)
-        # logist: list of [b, la, d_vocab]
-
-        if self.tuning is True:
-            return loss
-
-        logist = [torch.argmax(logist_, dim=1) for logist_ in logist]
-        trgs = [batch["a1_ids"], batch["a2_ids"]] if len(logist) > 1 else [batch["a1_ids"]]
-
-        bz = batch["q_ids"].size(0)
-        preds = []
-        for i in range(bz):
-            for output, trg in zip(logist, trgs):
-                preds.append(
-                    {
-                        "pred": output[i].cpu().detach().numpy(),
-                        "trg": trg[i].cpu().detach().numpy(),
-                    }
-                )
-
-        return {"loss": loss, "prediction": preds}
-
-    def training_epoch_end(self, outputs) -> None:
-        outputs = self.all_gather(outputs)
-
-        if not self.tuning and self.trainer.is_global_zero:
-            ## Calculate mean loss
-            loss = torch.mean(torch.cat([output["loss"] for output in outputs]))
-            self.log("train/loss_epoch", loss, rank_zero_only=True)
-
-            ## Calculate B-1, B-4, METEOR and ROUGE-L
-            output_ = []
-            for output in outputs:
-                output_.extend(output["prediction"])
-            outputs = []
-            for output in output_:
-                if len(output["pred"].size()) == 2:
-                    for b in range(output["pred"].size(0)):
-                        outputs.append({"pred": output["pred"][b], "trg": output["trg"][b]})
-                else:
-                    outputs.append(output)
-
-            outputs = self.get_prediction(outputs)
-
-            with open(self.path_train_pred, "a+") as pred_file:
-                json.dump(outputs, pred_file, indent=2, ensure_ascii=False)
-
-            bleu_1, bleu_4, meteor, rouge_l = get_scores(outputs)
-
-            self.log("train/bleu_1", bleu_1, rank_zero_only=True)
-            self.log("train/bleu_4", bleu_4, rank_zero_only=True)
-            self.log("train/meteor", meteor, rank_zero_only=True)
-            self.log("train/rouge_l", rouge_l, rank_zero_only=True)
-
-    def test_step(self, batch, batch_idx):
-        return 0
-
-    def validation_step(self, batch, batch_idx):
-        loss, logist = self.model.do_predict(**batch)
-        # logist: [b, la]
-
-        logist = [logist, logist]
-        trgs = [batch["a1_ids"], batch["a2_ids"]]
-
-        bz = batch["q_ids"].size(0)
-        preds = []
-        for i in range(bz):
-            for output, trg in zip(logist, trgs):
-                preds.append(
-                    {
-                        "pred": output[i].cpu().detach().numpy(),
-                        "trg": trg[i].cpu().detach().numpy(),
-                    }
-                )
-
-        return {"loss": loss, "prediction": preds}
-
-    def validation_epoch_end(self, outputs) -> None:
-        outputs = self.all_gather(outputs)
-
-        # if self.trainer.is_global_zero:
-        ## Calculate mean loss
-        loss = torch.mean(torch.cat([output["loss"] for output in outputs]))
-        self.log("valid/loss", loss, sync_dist=True)
-
-        ## Calculate B-1, B-4, METEOR and ROUGE-L
-        output_ = []
-        for output in outputs:
-            output_.extend(output["prediction"])
-        outputs = []
-        for output in output_:
-            if len(output["pred"].size()) == 2:
-                for b in range(output["pred"].size(0)):
-                    outputs.append({"pred": output["pred"][b], "trg": output["trg"][b]})
-            else:
-                outputs.append(output)
-
-        outputs = self.get_prediction(outputs)
-
-        with open(self.path_valid_pred, "a+") as pred_file:
-            json.dump(outputs, pred_file, indent=2, ensure_ascii=False)
-
-        bleu_1, bleu_4, meteor, rouge_l = get_scores(outputs)
-
-        # if self.trainer.is_global_zero:
-        self.log("valid/bleu_1", bleu_1, sync_dist=True)
-        self.log("valid/bleu_4", bleu_4, sync_dist=True)
-        self.log("valid/meteor", meteor, sync_dist=True)
-        self.log("valid/rouge_l", rouge_l, sync_dist=True)
-
-    def predict_step(self, batch, batch_idx: int, dataloader_idx: int = None):
-        _, logist = self.model.do_predict(**batch)
-        # logist: [b, la]
-
-        logist = [logist, logist]
-        trgs = [batch["a1_ids"], batch["a2_ids"]]
-
-        bz = batch["q_ids"].size(0)
-        preds = []
-        for i in range(bz):
-            for output, trg in zip(logist, trgs):
-                preds.append(
-                    {
-                        "pred": output[i].cpu().detach().numpy(),
-                        "trg": trg[i].cpu().detach().numpy(),
-                    }
-                )
-
-        return preds
-
-    def on_predict_epoch_end(self, results):
-        outputs = self.all_gather(results)
-
-        ## Calculate B-1, B-4, METEOR and ROUGE-L
-        output_ = []
-        for output in outputs:
-            output_.extend(output["prediction"])
-        outputs = []
-        for output in output_:
-            if len(output["pred"].size()) == 2:
-                for b in range(output["pred"].size(0)):
-                    outputs.append({"pred": output["pred"][b], "trg": output["trg"][b]})
-            else:
-                outputs.append(output)
-
-        outputs = self.get_prediction(outputs)
-
-        with open(self.path_valid_pred, "a+") as pred_file:
-            json.dump(outputs, pred_file, indent=2, ensure_ascii=False)
-
-        bleu_1, bleu_4, meteor, rouge_l = get_scores(outputs)
-
-        return bleu_1, bleu_4, meteor, rouge_l
 
     def configure_optimizers(self):
         no_decay = ["bias", "LayerNorm.weight"]
@@ -268,3 +99,220 @@ class NarrativeModel(plt.LightningModule):
             "frequency": 1,
         }
         return [optimizer], [lr_scheduler]
+
+    ####################################################################
+    # FOR TRAINING PURPOSE
+    ####################################################################
+    def get_prediction(self, pairs):
+        pairs = [
+            {
+                "pred": " ".join(self.bert_tokenizer.convert_ids_to_tokens(pair["pred"])),
+                "trg": " ".join(self.bert_tokenizer.convert_ids_to_tokens(pair["trg"])),
+            }
+            for pair in pairs
+        ]
+
+        return pairs
+
+    def training_step(self, batch, batch_idx: int):
+        loss, logist = self.model.do_train(**batch)
+        # logist: list of [b, la, d_vocab]
+
+        if self.is_tuning is True:
+            return {"loss": loss}
+
+        logist = [torch.argmax(logist_, dim=1) for logist_ in logist]
+        trgs_ = [batch["a1_ids"], batch["a2_ids"]] if len(logist) > 1 else [batch["a1_ids"]]
+
+        bz = batch["q_ids"].size(0)
+        preds, trgs = [], []
+        for i in range(bz):
+            for output, trg in zip(logist, trgs_):
+                preds.append(output[i])
+                trgs.append(trg[i])
+
+        return {
+            "loss": loss,
+            "pred": preds,
+            "trg": trgs,
+            "size_pred": logist[0].size(-1),
+            "size_trg": trgs_[0].size(-1),
+        }
+
+    def training_step_end(self, batch_parts):
+        if self.is_tuning is True:
+            return {"loss": batch_parts["loss"].mean()}
+
+        size_pred = (
+            batch_parts["size_pred"]
+            if isinstance(batch_parts["size_pred"], int)
+            else batch_parts["size_pred"][0]
+        )
+        size_trg = (
+            batch_parts["size_trg"]
+            if isinstance(batch_parts["size_trg"], int)
+            else batch_parts["size_trg"][0]
+        )
+
+        preds, trgs = [], []
+        for pred, trg in zip(batch_parts["pred"], batch_parts["trg"]):
+            preds.extend(pred.view(-1, size_pred).cpu().detach())
+            trgs.extend(trg.view(-1, size_trg).cpu().detach())
+
+        loss = batch_parts["loss"].mean()
+        self.log("train/loss", loss, on_step=True, on_epoch=True)
+
+        return {"loss": loss, "pred": preds, "trg": trgs}
+
+    def training_epoch_end(self, outputs) -> None:
+        if self.is_tuning is True:
+            return
+
+        pairs = {"pred": [], "trg": []}
+        loss = 0
+        for output in outputs:
+            pairs["pred"].extend(output["pred"])
+            pairs["trg"].extend(output["trg"])
+            loss += output["loss"]
+        outputs = pairs
+
+        ## Calculate B-1, B-4, METEOR and ROUGE-L
+        outputs = self.get_prediction(outputs)
+
+        with open(self.path_train_pred, "a+") as pred_file:
+            json.dump(outputs, pred_file, indent=2, ensure_ascii=False)
+
+        bleu_1, bleu_4, meteor, rouge_l = get_scores(outputs)
+
+        self.log("train/bleu_1", bleu_1)
+        self.log("train/bleu_4", bleu_4)
+        self.log("train/meteor", meteor)
+        self.log("train/rouge_l", rouge_l)
+
+    def validation_step(self, batch, batch_idx):
+
+        loss, logist = self.model.do_predict(**batch)
+        # logist: [b, la]
+
+        logist = [logist, logist] if self.use_2_answers else [logist]
+        trgs_ = [batch["a1_ids"], batch["a2_ids"]] if self.use_2_answers else [batch["a1_ids"]]
+
+        bz = batch["q_ids"].size(0)
+        preds, trgs = [], []
+        for i in range(bz):
+            for output, trg in zip(logist, trgs_):
+                preds.append(output[i])
+                trgs.append(trg[i])
+
+        return {
+            "loss": loss,
+            "pred": preds,
+            "trg": trgs,
+            "size_pred": logist[0].size(-1),
+            "size_trg": trgs_[0].size(-1),
+        }
+
+    def validation_step_end(self, batch_parts):
+        size_pred = (
+            batch_parts["size_pred"]
+            if isinstance(batch_parts["size_pred"], int)
+            else batch_parts["size_pred"][0]
+        )
+        size_trg = (
+            batch_parts["size_trg"]
+            if isinstance(batch_parts["size_trg"], int)
+            else batch_parts["size_trg"][0]
+        )
+
+        preds, trgs = [], []
+        for pred, trg in zip(batch_parts["pred"], batch_parts["trg"]):
+            preds.extend(pred.view(-1, size_pred).cpu().detach())
+            trgs.extend(trg.view(-1, size_trg).cpu().detach())
+
+        loss = batch_parts["loss"].mean()
+        self.log("valid/loss", loss, on_step=False, on_epoch=True)
+
+        return {"pred": preds, "trg": trgs}
+
+    def validation_epoch_end(self, outputs) -> None:
+        pairs = {"pred": [], "trg": []}
+        for output in outputs:
+            pairs["pred"].extend(output["pred"])
+            pairs["trg"].extend(output["trg"])
+        outputs = pairs
+
+        outputs = self.get_prediction(outputs)
+
+        with open(self.path_valid_pred, "a+") as pred_file:
+            json.dump(outputs, pred_file, indent=2, ensure_ascii=False)
+
+        bleu_1, bleu_4, meteor, rouge_l = get_scores(outputs)
+
+        self.log("valid/bleu_1", bleu_1)
+        self.log("valid/bleu_4", bleu_4)
+        self.log("valid/meteor", meteor)
+        self.log("valid/rouge_l", rouge_l)
+
+    def test_step(self, batch, batch_idx):
+
+        _, logist = self.model.do_predict(**batch)
+        # logist: [b, la]
+
+        logist = [logist, logist] if self.use_2_answers else [logist]
+        trgs_ = [batch["a1_ids"], batch["a2_ids"]] if self.use_2_answers else [batch["a1_ids"]]
+
+        bz = batch["q_ids"].size(0)
+        preds, trgs = [], []
+        for i in range(bz):
+            for output, trg in zip(logist, trgs_):
+                preds.append(output[i])
+                trgs.append(trg[i])
+
+        return {
+            "pred": preds,
+            "trg": trgs,
+            "size_pred": logist[0].size(-1),
+            "size_trg": trgs_[0].size(-1),
+        }
+
+    def test_step_end(self, batch_parts):
+        size_pred = (
+            batch_parts["size_pred"]
+            if isinstance(batch_parts["size_pred"], int)
+            else batch_parts["size_pred"][0]
+        )
+        size_trg = (
+            batch_parts["size_trg"]
+            if isinstance(batch_parts["size_trg"], int)
+            else batch_parts["size_trg"][0]
+        )
+
+        preds, trgs = [], []
+        for pred, trg in zip(batch_parts["pred"], batch_parts["trg"]):
+            preds.extend(pred.view(-1, size_pred).cpu().detach())
+            trgs.extend(trg.view(-1, size_trg).cpu().detach())
+
+        loss = batch_parts["loss"].mean()
+        self.log("valid/loss", loss, on_step=False, on_epoch=True)
+
+        return {"pred": preds, "trg": trgs}
+
+    def test_epoch_end(self, outputs) -> None:
+        pairs = {"pred": [], "trg": []}
+        for output in outputs:
+            pairs["pred"].extend(output["pred"])
+            pairs["trg"].extend(output["trg"])
+        outputs = pairs
+
+        outputs = self.get_prediction(outputs)
+
+        if not self.is_tuning:
+            with open(self.path_test_pred, "a+") as pred_file:
+                json.dump(outputs, pred_file, indent=2, ensure_ascii=False)
+
+        bleu_1, bleu_4, meteor, rouge_l = get_scores(outputs)
+
+        self.log("bleu_1", bleu_1)
+        self.log("bleu_4", bleu_4)
+        self.log("meteor", meteor)
+        self.log("rouge_l", rouge_l)

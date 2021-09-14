@@ -40,7 +40,7 @@ class NarrativeDataModule(plt.LightningDataModule):
 
         return DataLoader(dataset=self.data_valid, batch_size=self.batch_size)
 
-    def predict_dataloader(self):
+    def test_dataloader(self):
         """Return DataLoader for prediction."""
 
         return DataLoader(

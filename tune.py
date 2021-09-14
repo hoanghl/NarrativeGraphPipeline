@@ -30,8 +30,9 @@ def main(config: DictConfig):
         config.trainer.accelerator = "ddp"
         config.trainer.replace_sampler_ddp = True
 
-    if config.tuning is True:
-        config.trainer.check_val_every_n_epoch = 0
+    config.trainer.check_val_every_n_epoch = 100
+    config.logger.tensorboard.name = config.logger.tensorboard.name + "_tune"
+    config.logger.wandb.name = config.logger.wandb.name + "_tune"
 
     utils.extras(config)
     utils.print_config(config, resolve=True)
@@ -44,10 +45,9 @@ def main(config: DictConfig):
 
     # Init lightning model
     log.info(f"Instantiating model <{config.model._target_}>")
-    model: LightningModule = hydra.utils.instantiate(config.model, tuning=config.tuning)
-
+    model: LightningModule = hydra.utils.instantiate(config.model, is_tuning=True)
     # Init lightning loggers
-    default_log = "tensorboard" if "log" not in config else config.log
+    default_log = "wandb" if "log" not in config else config.log
     logger: List[LightningLoggerBase] = []
     if "logger" in config and config.logger is not None:
         for name, lg_conf in config.logger.items():
@@ -83,11 +83,16 @@ def main(config: DictConfig):
 
     # Train the model
     log.info("Starting training!")
-    # FIXME: Uncomment the following
     trainer.fit(model=model, datamodule=datamodule)
 
     log.info("Starting predicting!")
-    bleu_1, bleu_4, meteor, rouge_l = trainer.predict(model=model, datamodule=datamodule)
+    output = trainer.test(model=model, datamodule=datamodule)
+    bleu_1, bleu_4, meteor, rouge_l = (
+        output[0]["bleu_1"],
+        output[0]["bleu_4"],
+        output[0]["meteor"],
+        output[0]["rouge_l"],
+    )
 
     # Make sure everything closed properly
     log.info("Finalizing!")
@@ -97,6 +102,7 @@ def main(config: DictConfig):
         datamodule=datamodule,
         trainer=trainer,
         logger=logger,
+        callbacks=None,
     )
 
     return bleu_1

@@ -2,6 +2,12 @@
 
 ### This file contains changes and modifications during developing.
 
+## Sep 14, 17:00
+
+- Modify some components in config, module **tune**
+- Modify in module **Backbone**
+- Modify to fit with new template for module **narrative_model**
+
 ## Sep 4, 14:40
 
 - Add functionalities for _tuning_

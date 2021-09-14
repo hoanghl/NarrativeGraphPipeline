@@ -26,6 +26,8 @@ class Backbone(torch_nn.Module):
     ):
         super().__init__()
 
+        self.d_vocab = d_vocab
+
         self.embedding = Embedding(d_hid, d_bert, path_pretrained)
         self.ial = IntrospectiveAlignmentLayer(batch_size, nc, lc, d_hid, dropout, block, device)
         self.pgn = PGN(
@@ -33,6 +35,16 @@ class Backbone(torch_nn.Module):
         )
 
         self.criterion = criterion
+    
+    def _ids2dist(self, inputs):
+        indices = inputs.unsqueeze(-1)
+        a = torch.full((*inputs.size(), self.d_vocab), 1e-6, dtype=torch.float, device=inputs.device)
+        a.scatter_(
+            dim=-1,
+            index=indices,
+            src=torch.full(indices.size(), 0.99, dtype=torch.float, device=inputs.device),
+        )
+        return a
 
     def get_loss(self, output_mle, trgs, is_loss_ot=False, gamma=0.08):
         loss = 0
@@ -63,7 +75,7 @@ class Backbone(torch_nn.Module):
             -1,
         )
 
-    def do_train(self, q_ids, c_ids, a1_ids, a2_ids):
+    def do_train(self, q_ids, c_ids, a1_ids, a2_ids, use_2_answers=False):
         # q_ids: [b, lq]
         # c_ids: [b, nc, lc]
         # a1_ids: [b, la]
@@ -72,21 +84,29 @@ class Backbone(torch_nn.Module):
         # l = nc * lc
 
         q, c, c_ids = self.embedding.embed_qc(q_ids, c_ids)
-        a1, a2 = self.embedding.embed_a(a1_ids), self.embedding.embed_a(a2_ids)
-        # q, c, a1, a2: [bz, l_, d_hid]
+        # q, c: [bz, l_, d_hid]
         # c_ids: [bz, nc*lc]
 
         Y = self.ial(q, c)
         # [bz, l, 2*d_hid]
 
-        output_mle = [self.pgn.do_train(Y, q, a, c_ids) for a in [a1, a2]]
-        trgs = [self.get_trgs(a_ids) for a_ids in [a1_ids, a2_ids]]
+        output_mle, trgs = [], []
+        ans = [a1_ids, a2_ids] if use_2_answers else [a1_ids]
+        for a_ids in ans:
+            a = self.embedding.embed_a(a_ids)
+            # a: [bz, l_, d_hid]
+
+            output_mle_ = self.pgn.do_train(Y, q, a, c_ids)
+            trg = self.get_trgs(a_ids)
+
+            output_mle.append(output_mle_)
+            trgs.append(trg)
 
         loss = self.get_loss(output_mle, trgs)
 
         return loss, output_mle
 
-    def do_predict(self, q_ids, c_ids, a1_ids, a2_ids):
+    def do_predict(self, q_ids, c_ids, a1_ids, a2_ids, use_2_answers=False):
         # q_ids: [b, lq]
         # c_ids: [b, nc, lc]
         # a1_ids: [b, la]
@@ -99,9 +119,17 @@ class Backbone(torch_nn.Module):
         Y = self.ial(q, c)
         # [bz, l, 2*d_hid]
 
-        output_mle, outputs = self.pgn.do_predict(Y, q, c_ids)
-        trgs = [self.get_trgs(a_ids) for a_ids in [a1_ids, a2_ids]]
+        outputs = self.pgn.do_predict(Y, q, c_ids)
 
-        loss = self.get_loss([output_mle, output_mle], trgs)
+        output_mle_ = self.ids2dist(outputs).transpose(-1, -2)
+        # [b, la, d_vocab]
+
+        if use_2_answers:
+            trgs = [self.get_trgs(a_ids) for a_ids in [a1_ids, a2_ids]]
+            output_mle = [output_mle_, output_mle_]
+        else:
+            trgs = [self.get_trgs(a1_ids)]
+            output_mle = [output_mle_]
+        loss = self.get_loss(output_mle, trgs)
 
         return loss, outputs

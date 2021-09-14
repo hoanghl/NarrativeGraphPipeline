@@ -49,7 +49,7 @@ hydra:
     search_space:
       batch_size:
         type: categorical
-        choices: [5, 8, 10]
+        choices: [4, 6, 8]
       model.w_decay:
         type: float
         low: 2e-2
@@ -62,10 +62,12 @@ hydra:
         type: float
         low: 1e-5
         high: 2e-2
-
       model.d_hid:
         type: categorical
         choices: [64, 128, 256]
+      model.use_2_answers:
+        type: categorical
+        choices: [True, False]
 
 ##################################
 ## CONFIGURATIONS for components
@@ -77,12 +79,12 @@ PATH:
   pretrained: ${PATH.utils}/bert-base-uncased
   train_pred: ${work_dir}/logs/train_pred.json
   valid_pred: ${work_dir}/logs/valid_pred.json
+  test_pred: ${work_dir}/logs/test_pred.json
   pred: ${data_dir}/prediction.json
   last_best: ${work_dir}/logs/last_best.ckpt
 
 mode: train
 multigpu: False
-tuning: False
 
 batch_size: 8
 n_workers: 8
@@ -137,6 +139,8 @@ model:
   path_pretrained: ${PATH.pretrained}
   path_train_pred: ${PATH.train_pred}
   path_valid_pred: ${PATH.valid_pred}
+  path_test_pred: ${PATH.test_pred}
+  use_2_answers: False
 
 datamodule:
   _target_: datamodules.narrative_datamodule.NarrativeDataModule

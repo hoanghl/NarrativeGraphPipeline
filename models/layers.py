@@ -205,17 +205,6 @@ class NonLinear(torch_nn.Module):
         return self.ff(X)
 
 
-def ids2dist(inputs, d_vocab):
-    indices = inputs.unsqueeze(-1)
-    a = torch.full((*inputs.size(), d_vocab), 1e-6, dtype=torch.float, device=inputs.device)
-    a.scatter_(
-        dim=-1,
-        index=indices,
-        src=torch.full(indices.size(), 0.99, dtype=torch.float, device=inputs.device),
-    )
-    return a
-
-
 class PGN(torch_nn.Module):
     def __init__(self, la, d_hid, d_vocab, num_layers_lstm, dropout, path_pretrained, embedding):
         super().__init__()
@@ -356,7 +345,4 @@ class PGN(torch_nn.Module):
                 if pred_tok == self.sep_id:
                     break
 
-        output_mle = ids2dist(outputs, self.d_vocab)
-        # [b, la, d_vocab]
-
-        return output_mle.transpose(-1, -2), outputs
+        return outputs
