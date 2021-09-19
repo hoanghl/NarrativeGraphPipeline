@@ -1,138 +1,114 @@
+import json
+
+import numpy as np
 import torch
-import torch.nn as torch_nn
+import torch.nn as nn
 import torch.nn.functional as F
-from transformers import BertModel, logging
-from transformers.models.bert.tokenization_bert import BertTokenizer
-
-logging.set_verbosity_error()
+from datamodules.dataset import Vocab
+from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 
-class Embedding(torch_nn.Module):
-    def __init__(self, d_hid, d_bert, path_pretrained):
+class Embedding(nn.Module):
+    def __init__(self, d_embd, d_hid, path_pretrained, path_vocab, num_layers, dropout):
         super().__init__()
 
-        tokenizer = BertTokenizer.from_pretrained(path_pretrained)
-        self.pad_id = tokenizer.pad_token_id
+        emb_vecs = self.load_embeddings(d_embd, path_vocab, path_pretrained)
+        self.embedding = nn.Embedding.from_pretrained(
+            emb_vecs, freeze=False, padding_idx=Vocab(path_vocab).pad_id
+        )
+        self.biLSTM = nn.LSTM(
+            input_size=d_embd,
+            hidden_size=d_hid // 2,
+            num_layers=num_layers,
+            batch_first=True,
+            dropout=dropout,
+            bidirectional=True,
+        )
 
-        self.embedding = BertModel.from_pretrained(path_pretrained)
-        self.lin = torch_nn.Linear(d_bert, d_hid)
+    def load_embeddings(self, d_embd, path_vocab, path_pretrained):
+        with open(path_pretrained.replace("[d_embd]", f"{d_embd}"), "rt") as f:
+            full_content = f.read().strip().split("\n")
 
-    def _get_padding_mask(self, ids):
-        s_l = ids.size(0)
-        l = (ids != self.pad_id).sum()
-        ones = torch.ones((s_l, s_l), device=ids.device)
-        mask = ones.tril()
-        mask[:, :l] = 1
-        padding_mask = (ids != self.pad_id).float()
-        mask *= padding_mask
-        mask *= padding_mask.unsqueeze(1)
-        return mask
+        glove = {}
+        for entry in full_content:
+            tmp = entry.split(" ")
+            i_word = tmp[0]
+            i_embeddings = [float(val) for val in tmp[1:]]
+            glove[i_word] = np.array(i_embeddings)
 
-    def embed_qc(self, q_ids, c_ids):
-        # q_ids: [bz, lq]
-        # c_ids: [bz, nc, lc]
-        # a1_ids: [bz, la]
-        # a2_ids: [bz, la]
+        with open(path_vocab, "r") as f:
+            vocab = json.load(f)
 
-        bz = c_ids.size(0)
+        emb_vecs = []
+        for word in vocab:
+            try:
+                w_emb = torch.from_numpy(glove[word])
+            except KeyError:
+                w_emb = torch.rand((d_embd, 1))
+                nn.init.kaiming_normal_(w_emb, mode="fan_out")
+                w_emb = w_emb.squeeze()
 
-        ## Create mask matrix
-        q_masks = []
-        for q in q_ids:
-            q_msk = self._get_padding_mask(q)
-            q_masks.append(q_msk.unsqueeze(0))
+            emb_vecs.append(w_emb)
 
-        q_masks = torch.cat(q_masks, 0)
+        emb_vecs = torch.stack(emb_vecs)
 
-        c_ids = c_ids.view(-1, c_ids.size(-1))
-        c_masks_, c_l = [], []
-        for c in c_ids:
-            c_l.append((c != self.pad_id).sum().unsqueeze(0))
-            c_masks_.append(self._get_padding_mask(c).unsqueeze(0))
-        c_masks_ = torch.cat(c_masks_, 0)
-        c_l = torch.cat(c_l, 0)
+        return emb_vecs
 
-        ## Embed
-        q = self.embedding(q_ids, q_masks)[0]
-        c_ = self.embedding(c_ids, c_masks_)[0]
+    def forward(self, s_ids, s_masks):
+        # s_ids: [bz, l]
+        # s_masks: [bz, l]
 
-        ## Merge para into single one
-        c, c_masks, c_ids_, c_ids_mask_ = [], [], [], []
-        for ci, ci_l, cid in zip(c_, c_l, c_ids):
-            c.append(ci[:ci_l])
-            c_masks.append(ci[ci_l:])
-            c_ids_.append(cid[:ci_l])
-            c_ids_mask_.append(cid[ci_l:])
-        c = torch.cat(c + c_masks, 0).view(bz, -1, q.size(-1))
-        # [bz, nc*lc, d_bert]
-        c_ids = torch.cat(c_ids_ + c_ids_mask_, 0).view(bz, -1)
-        # [bz, nc*lc]
+        bz, l = s_ids.size()
 
-        ## Move to new dimension
-        q, c = self.lin(q), self.lin(c)
+        s = self.embedding(s_ids).float()
+        # [bz, l, d_embd]
+
+        packed = pack_padded_sequence(
+            s, s_masks.sum(-1).cpu(), batch_first=True, enforce_sorted=False
+        )
+        output, _ = self.biLSTM(packed)
+        output, _ = pad_packed_sequence(output, batch_first=True)
         # [bz, l_, d_hid]
 
-        return q, c, c_ids
+        ## Pad inf
+        d_hid = output.size(-1)
+        pad_ = torch.zeros(
+            (bz, l - output.size(1), d_hid),
+            dtype=output.dtype,
+            device=output.device,
+        )
+        output = torch.cat((output, pad_), 1)
+        # [bz, l, d_hid]
 
-    def embed_a(self, a_ids):
-        # a_ids: [b, la]
+        return output
 
-        ## Create mask matrix
-        a_masks = []
-        for a in a_ids:
-            a_msk = self._get_padding_mask(a)
-            a_masks.append(a_msk.unsqueeze(0))
-        a_masks = torch.cat(a_masks, 0)
+    def embed_only(self, s_ids):
+        # s_ids: [bz, l_]
 
-        ## Embed
-        a = self.embedding(a_ids, a_masks)[0]
-
-        ## Move to new dimension
-        a = self.lin(a)
-        # [bz, la, d_hid]
-
-        return a
-
-    def embed_token(self, ids):
-        # a_ids: [b_, 1]
-
-        # Embed
-        embd = self.embedding.embeddings.word_embeddings(ids)
-
-        ## Move to new dimension
-        embd = self.lin(embd)
-        # [b_, 1, d_hid]
-
-        return embd
+        return self.embedding(s_ids).float()
 
 
-class IntrospectiveAlignmentLayer(torch_nn.Module):
-    def __init__(self, batch_size, nc, lc, d_hid, dropout, block, device):
+class IntrospectiveAlignmentLayer(nn.Module):
+    def __init__(self, batch_size, lc, d_hid, dropout, block, device):
         super().__init__()
 
-        self.lin1 = torch_nn.Sequential(
-            torch_nn.Linear(d_hid, d_hid), torch_nn.Tanh(), torch_nn.Dropout(dropout)
-        )
-        self.lin2 = torch_nn.Sequential(
-            torch_nn.Linear(4 * d_hid, 4 * d_hid), torch_nn.Tanh(), torch_nn.Dropout(dropout)
-        )
-        self.biLSTM_attn = torch_nn.LSTM(
+        self.lin1 = nn.Sequential(nn.Linear(d_hid, d_hid), nn.Tanh(), nn.Dropout(dropout))
+        self.lin2 = nn.Sequential(nn.Linear(4 * d_hid, 4 * d_hid), nn.Tanh(), nn.Dropout(dropout))
+        self.biLSTM_attn = nn.LSTM(
             8 * d_hid, d_hid, num_layers=5, batch_first=True, bidirectional=True
         )
 
-        l = nc * lc
-        self.mask = torch.zeros((1, l, l), dtype=torch.float, device=device)
-        for i in range(l):
-            for j in range(l):
+        self.mask = torch.zeros((1, lc, lc), dtype=torch.float, device=device)
+        for i in range(lc):
+            for j in range(lc):
                 if abs(i - j) <= block:
                     self.mask[0, i, j] = 1
         self.mask = self.mask.repeat((batch_size, 1, 1))
 
     def forward(self, Hq, Hc):
         # Hq: [bz, lq, d_hid]
-        # Hc: [bz, nc*lc, d_hid]
+        # Hc: [bz, lc, d_hid]
 
-        # l = nc * lc
         bz = Hq.size(0)
 
         # Introspective Alignment
@@ -140,108 +116,104 @@ class IntrospectiveAlignmentLayer(torch_nn.Module):
         # [bz, l_, d_hid]
 
         E = Hc @ Hq.transpose(-1, -2)
-        # E: [bz, l, lq]
+        # E: [bz, lc, lq]
         A = E.softmax(-1) @ Hq
-        # A: [bz, l, d_hid]
+        # A: [bz, lc, d_hid]
 
         # Reasoning over alignments
         tmp = torch.cat((A, Hc, A - Hc, A * Hc), dim=-1)
-        # [bz, l, 4*d_hid]
+        # [bz, lc, 4*d_hid]
         G = self.lin2(tmp)
-        # [bz, l, 4*d_hid]
+        # [bz, lc, 4*d_hid]
 
         G = G @ G.transpose(-1, -2)
         G = G * self.mask.type_as(G)[:bz]
-        # [bz, l, l]
+        # [bz, lc, lc]
 
         # Local BLock-based Self-Attention
         B = G.softmax(-1) @ tmp
-        # B: [bz, l, 4*d_hid]
+        # B: [bz, lc, 4*d_hid]
 
         Y = torch.cat((B, tmp), dim=-1)
-        # [bz, l, 8*d_hid]
+        # [bz, lc, 8*d_hid]
         Y = self.biLSTM_attn(Y)[0]
-        # [bz, l, 2*d_hid]
+        # [bz, lc, 2*d_hid]
 
         return Y
 
 
-class AttnPooling(torch_nn.Module):
-    def __init__(self, d_hid):
+class AttnPooling(nn.Module):
+    def __init__(self, d_hid, dropout):
         super().__init__()
 
-        self.lin_att1 = torch_nn.Linear(d_hid, d_hid, bias=False)
-        self.lin_att2 = torch_nn.Linear(d_hid, d_hid, bias=False)
-        self.ff_attn = torch_nn.Sequential(
-            torch_nn.Linear(d_hid, d_hid),
-            torch_nn.Tanh(),
-            torch_nn.Dropout(),
-            torch_nn.Linear(d_hid, 1),
-            torch_nn.Softmax(-1),
+        self.lin_att1 = nn.Linear(d_hid, d_hid, bias=False)
+        self.lin_att2 = nn.Linear(d_hid, d_hid, bias=False)
+        self.ff_attn = nn.Sequential(
+            nn.Linear(d_hid, d_hid), nn.Tanh(), nn.Dropout(dropout), nn.Linear(d_hid, 1)
         )
 
-    def forward(self, ai, q):
-        # q: [bz, d_hid]
-        # ai: [bz, lq, d_hid]
+    def forward(self, ai, q, q_masks):
+        # ai: [bz, d_hid]
+        # q: [bz, lq, d_hid]
+        # q_masks: [bz, lq]
 
-        a = self.ff_attn(self.lin_att1(q) + self.lin_att2(ai).unsqueeze(1))
-        # [bz, lq, 1]
+        a = self.ff_attn(self.lin_att1(q) + self.lin_att2(ai).unsqueeze(1)).squeeze(-1)
+        # [bz, lq]
+        a = a.float().masked_fill_(q_masks, 1e-8).type_as(q)
+        a = a.softmax(-1)
 
-        h = (q * a).sum(dim=1)
+        h = (q * a.unsqueeze(-1)).sum(dim=1)
         # [bz, d_hid]
 
         return h
 
 
-class NonLinear(torch_nn.Module):
+class NonLinear(nn.Module):
     def __init__(self, d, dropout):
         super().__init__()
 
-        self.ff = torch_nn.Sequential(
-            torch_nn.Linear(d, d), torch_nn.Tanh(), torch_nn.Dropout(dropout)
-        )
+        self.ff = nn.Sequential(nn.Linear(d, d), nn.Tanh(), nn.Dropout(dropout))
 
     def forward(self, X):
         return self.ff(X)
 
 
-class PGN(torch_nn.Module):
-    def __init__(self, la, d_hid, d_vocab, num_layers_lstm, dropout, path_pretrained, embedding):
+class PGN(nn.Module):
+    def __init__(self, la, d_embd, d_hid, d_vocab, num_layers, dropout, path_vocab, embedding):
         super().__init__()
 
-        tokenizer = BertTokenizer.from_pretrained(path_pretrained)
         self.la = la
-        self.cls_id = tokenizer.cls_token_id
-        self.sep_id = tokenizer.sep_token_id
+        vocab = Vocab(path_vocab)
+        self.sos_id = vocab.sos_id
+        self.eos_id = vocab.eos_id
         self.d_vocab = d_vocab
 
         self.embedding = embedding
-        self.attn_pooling = AttnPooling(d_hid)
+        self.attn_pooling = AttnPooling(d_hid, dropout)
         self.ff1 = NonLinear(d_hid, dropout)
-        self.ff2 = self.ff = torch_nn.Sequential(
-            NonLinear(2 * d_hid, dropout), torch_nn.Linear(2 * d_hid, d_hid)
+        self.ff2 = self.ff = nn.Sequential(
+            NonLinear(2 * d_hid, dropout), nn.Linear(2 * d_hid, d_hid)
         )
-        self.ff3 = torch_nn.Sequential(
-            NonLinear(d_hid, dropout), torch_nn.Linear(d_hid, 1), torch_nn.Softmax(-1)
-        )
-        self.lstm = torch_nn.LSTM(
-            2 * d_hid, d_hid, num_layers_lstm, batch_first=True, dropout=dropout
-        )
-        self.lin_pgn = torch_nn.Linear(d_hid, d_vocab)
-        self.lin_pgn1 = torch_nn.Linear(d_hid, 1)
-        self.lin_pgn2 = torch_nn.Linear(d_hid, 1)
-        self.lin_pgn3 = torch_nn.Linear(d_hid, 1)
+        self.ff3 = nn.Sequential(NonLinear(d_hid, dropout), nn.Linear(d_hid, 1))
+        self.lin1 = nn.Linear(d_embd, d_hid, bias=False)
+        self.lstm = nn.LSTM(2 * d_hid, d_hid, num_layers, batch_first=True, dropout=dropout)
+        self.lin_pgn = nn.Linear(d_hid, d_vocab)
+        self.lin_pgn1 = nn.Linear(d_hid, 1)
+        self.lin_pgn2 = nn.Linear(d_hid, 1)
+        self.lin_pgn3 = nn.Linear(d_hid, 1)
 
-    def do_train(self, Y, q, a, c_ids):
-        # Y: [bz, nc * lc, 2 * d_hid]
+    def do_train(self, Y, q, q_masks, a, c_ids_ext, c_masks):
+        # Y: [bz, lc, 2 * d_hid]
         # q: [bz, lq, d_hid]
-        # a: [bz, la, d_hid]
-        # c_ids: [bz, nc*lc]
-
-        # l = nc * lc
+        # q_masks: [bz, lq]
+        # a: [bz, la, d_embd]
+        # c_ids_ext: [bz, lc]
 
         Y = self.ff2(Y)
-        # [bz, l, d_hid]
+        # [bz, lc, d_hid]
+        a = self.lin1(a)
+        # [bz, la, d_hid]
+
         outputs = []
         h, c = None, None
         for i in range(self.la):
@@ -249,9 +221,12 @@ class PGN(torch_nn.Module):
 
             ## Attention over Y
             h_ = self.ff1(h.transpose(0, 1).sum(dim=1)).unsqueeze(1) if torch.is_tensor(h) else 0
-            at = self.ff3(h_ + Y + self.attn_pooling(ai, q).unsqueeze(1))
-            # [bz, l, 1]
-            y = (at * Y).sum(dim=1)
+            at = self.ff3(h_ + Y + self.attn_pooling(ai, q, q_masks).unsqueeze(1)).squeeze(-1)
+            # [bz, lc]
+            ## Mask padding positions
+            at = at.float().masked_fill_(c_masks, 1e-8).type_as(q)
+            at = at.softmax(-1)
+            y = (at.unsqueeze(-1) * Y).sum(dim=1)
             # [bz, d_hid]
 
             ## Pass over LSTM
@@ -264,46 +239,64 @@ class PGN(torch_nn.Module):
 
             ## PGN
             h_, c_ = h.transpose(0, 1).sum(dim=1), c.transpose(0, 1).sum(dim=1)
-            vt = self.lin_pgn(h_)
-            # [bz, d_vocab]
             pt = F.sigmoid(self.lin_pgn1(c_) + self.lin_pgn2(h_) + self.lin_pgn3(y))
             # [bz, 1]
-            wt = (1 - pt) * vt
-            at = torch.scatter_add(torch.zeros_like(vt), -1, c_ids, at.squeeze(-1)).softmax(-1)
-            wt = wt + pt * at
+
+            vt = self.lin_pgn(h_)
             # [bz, d_vocab]
+            vt = vt.softmax(-1)
+            vt = (1 - pt) * vt
 
-            outputs.append(wt.unsqueeze(-1))
+            at = pt * at
 
-        output_mle = torch.cat(outputs, -1)
-        # [b, d_vocab, la]
+            ## Padd zeros to vt for OOV positions
+            extra_zeros = torch.zeros_like(at)
+            extended_vt = torch.cat((vt, extra_zeros), dim=-1)
+            # [bz, d_vocab + lc]
+
+            wt = extended_vt.scatter_add(-1, index=c_ids_ext, src=at)
+            # [bz, d_vocab + lc]
+
+            outputs.append(wt.unsqueeze(1))
+
+        output_mle = torch.cat(outputs, 1)
+        # [b, la, d_vocab + lc]
 
         return output_mle
 
-    def do_predict(self, Y, q, c_ids):
-        # Y: [bz, nc * lc, 2 * d_hid]
+    def do_predict(self, Y, q, q_masks, c_ids_ext, c_masks):
+        # Y: [bz, lc, 2 * d_hid]
         # q: [bz, lq, d_hid]
-        # a: [bz, l_, d_hid]
-        # c_ids: [bz, nc*lc]
+        # c_ids: [bz, lc]
 
         bz = Y.size(0)
 
         Y = self.ff2(Y)
-        # [bz, l, d_hid]
+        # [bz, lc, d_hid]
         outputs = torch.zeros(bz, self.la, dtype=torch.long, device=Y.device)
 
         for b in range(bz):
             h, c = 0, 0
-            q_, c_ids_, Y_ = q[b : b + 1], c_ids[b : b + 1], Y[b : b + 1]
+            q_, q_masks_, c_ids_ext_, c_masks_, Y_ = (
+                q[b : b + 1],
+                q_masks[b : b + 1],
+                c_ids_ext[b : b + 1],
+                c_masks[b : b + 1],
+                Y[b : b + 1],
+            )
             for i in range(self.la):
                 ## Embd token generated in last step
                 last_tok = (
                     outputs[b : b + 1, i - 1 : i]
                     if i > 0
-                    else torch.full((1, 1), self.cls_id, dtype=c_ids.dtype, device=c_ids.device)
+                    else torch.full(
+                        (1, 1), self.sos_id, dtype=c_ids_ext.dtype, device=c_ids_ext.device
+                    )
                 )
                 # [1, 1]
-                last_tok = self.embedding.embed_token(last_tok).squeeze(1)
+                last_tok = self.embedding.embed_only(last_tok).squeeze(1)
+                # [1, d_embd]
+                last_tok = self.lin1(last_tok)
                 # [1, d_hid]
 
                 ## Attention over Y
@@ -312,9 +305,14 @@ class PGN(torch_nn.Module):
                     if torch.is_tensor(h)
                     else 0
                 )
-                at = self.ff3(h_ + Y_ + self.attn_pooling(last_tok, q_).unsqueeze(1))
-                # [1, l, 1]
-                y = (at * Y_).sum(dim=1)
+                at = self.ff3(
+                    h_ + Y_ + self.attn_pooling(last_tok, q_, q_masks_).unsqueeze(1)
+                ).squeeze(-1)
+                # [1, lc]
+                ## Mask padding positions
+                at = at.float().masked_fill_(c_masks_, 1e-8).type_as(q)
+                at = at.softmax(-1)
+                y = (at.unsqueeze(-1) * Y_).sum(dim=1)
                 # [1, d_hid]
 
                 ## Pass over LSTM
@@ -327,22 +325,28 @@ class PGN(torch_nn.Module):
 
                 ## PGN
                 h_, c_ = h.transpose(0, 1).sum(dim=1), c.transpose(0, 1).sum(dim=1)
-                vt = self.lin_pgn(h_)
-                # [1, d_vocab]
                 pt = F.sigmoid(self.lin_pgn1(c_) + self.lin_pgn2(h_) + self.lin_pgn3(y))
                 # [1, 1]
 
-                wt = (1 - pt) * vt
-                at = torch.scatter_add(torch.zeros_like(vt), -1, c_ids_, at.squeeze(-1)).softmax(
-                    -1
-                )
-                wt = wt + pt * at
+                vt = self.lin_pgn(h_)
                 # [1, d_vocab]
+                vt = vt.softmax(-1)
+                vt = (1 - pt) * vt
+
+                at = pt * at
+
+                ## Padd zeros to vt for OOV positions
+                extra_zeros = torch.zeros_like(at)
+                extended_vt = torch.cat((vt, extra_zeros), dim=-1)
+                # [1, d_vocab + lc]
+
+                wt = extended_vt.scatter_add(-1, index=c_ids_ext_, src=at)
+                # [1, d_vocab + lc]
 
                 pred_tok = wt.argmax(-1)
                 # [1]
                 outputs[b, i] = pred_tok
-                if pred_tok == self.sep_id:
+                if pred_tok == self.eos_id:
                     break
 
         return outputs

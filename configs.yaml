@@ -74,13 +74,12 @@ hydra:
 ##################################
 PATH:
   utils: ""
-  raw: ${PATH.utils}/raw
-  data: ${PATH.utils}/processed/story/[SPLIT].parquet
-  pretrained: ${PATH.utils}/bert-base-uncased
-  train_pred: ${work_dir}/logs/train_pred.json
-  valid_pred: ${work_dir}/logs/valid_pred.json
-  test_pred: ${work_dir}/logs/test_pred.json
-  pred: ${data_dir}/prediction.json
+  data: ${PATH.utils}/[SPLIT].pkl
+  vocab: ${PATH.utils}/vocab.json
+  pretrained: ${PATH.utils}/glove.6B.[d_embd]d.txt
+  train: ${work_dir}/logs/train_pred.json
+  valid: ${work_dir}/logs/valid_pred.json
+  test: ${work_dir}/logs/test_pred.json
   last_best: ${work_dir}/logs/last_best.ckpt
 
 mode: train
@@ -91,7 +90,7 @@ n_workers: 8
 
 lq: 35
 nc: 10
-lc: 180
+lc: 1800
 la: 12
 sizes_dataset:
   train: 32747
@@ -125,10 +124,10 @@ model:
   lc: ${lc}
   la: ${la}
   nc: ${nc}
-  d_bert: 768
+  d_embd: 50
   d_hid: 128
-  d_vocab: 30522
-  num_layers_lstm: 5
+  d_vocab: 30975
+  num_layers: 5
   block: 200
   lr: 1e-5
   w_decay: 1e-2
@@ -137,17 +136,21 @@ model:
   max_epochs: ${trainer.max_epochs}
   size_dataset_train: ${sizes_dataset.train}
   path_pretrained: ${PATH.pretrained}
-  path_train_pred: ${PATH.train_pred}
-  path_valid_pred: ${PATH.valid_pred}
-  path_test_pred: ${PATH.test_pred}
+  path_train_pred: ${PATH.train}
+  path_valid_pred: ${PATH.valid}
+  path_test_pred: ${PATH.test}
+  path_vocab: ${PATH.vocab}
   use_2_answers: False
 
 datamodule:
   _target_: datamodules.narrative_datamodule.NarrativeDataModule
   batch_size: ${batch_size}
+  lq: ${lq}
+  la: ${la}
   lc: ${lc}
   nc: ${nc}
   path_data: ${PATH.data}
+  path_vocab: ${PATH.vocab}
 
 callbacks:
   ModelCheckpoint:

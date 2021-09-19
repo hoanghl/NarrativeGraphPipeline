@@ -2,6 +2,12 @@
 
 ### This file contains changes and modifications during developing.
 
+## Sep 19, 17:30
+
+- Discard _BERT embedding_, replace by _GloVe_
+- Fix mistaken implementation in _PGN_: extended vocab
+- Use data and vocab tailored for this project only
+
 ## Sep 14, 17:00
 
 - Modify some components in config, module **tune**

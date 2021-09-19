@@ -1,9 +1,11 @@
 import json
+import os
 
 import pytorch_lightning as plt
 import torch
-import torch.nn as torch_nn
-from transformers import AdamW, BertTokenizer, get_linear_schedule_with_warmup
+import torch.nn as nn
+from transformers import AdamW, get_linear_schedule_with_warmup
+from utils.datamodule_utils import Vocab
 from utils.model_utils import get_scores
 
 from models.Backbone import Backbone
@@ -16,10 +18,10 @@ class NarrativeModel(plt.LightningModule):
         lc,
         la,
         nc,
-        d_bert,
+        d_embd,
         d_hid,
         d_vocab,
-        num_layers_lstm,
+        num_layers,
         block,
         lr,
         w_decay,
@@ -31,6 +33,7 @@ class NarrativeModel(plt.LightningModule):
         path_valid_pred,
         path_train_pred,
         path_test_pred,
+        path_vocab,
         use_2_answers,
         is_tuning=False,
     ):
@@ -42,10 +45,11 @@ class NarrativeModel(plt.LightningModule):
         self.warmup_rate = warmup_rate
         self.path_valid_pred = path_valid_pred
         self.path_train_pred = path_train_pred
+        self.path_test_pred = path_test_pred
         self.n_training_steps = size_dataset_train // batch_size * max_epochs
         self.use_2_answers = use_2_answers
         self.is_tuning = is_tuning
-        self.bert_tokenizer = BertTokenizer.from_pretrained(path_pretrained)
+        self.vocab = Vocab(path_vocab)
 
         #############################
         # Define model
@@ -55,16 +59,19 @@ class NarrativeModel(plt.LightningModule):
             la=la,
             lc=lc,
             nc=nc,
-            d_bert=d_bert,
+            d_embd=d_embd,
             d_hid=d_hid,
             d_vocab=d_vocab,
-            num_layers_lstm=num_layers_lstm,
+            num_layers=num_layers,
             block=block,
             dropout=dropout,
             path_pretrained=path_pretrained,
-            criterion=torch_nn.CrossEntropyLoss(ignore_index=self.bert_tokenizer.pad_token_id),
+            path_vocab=path_vocab,
+            criterion=nn.CrossEntropyLoss(ignore_index=self.vocab.pad_id),
             device=self.device,
         )
+
+        os.makedirs(os.path.dirname(self.path_train_pred), exist_ok=True)
 
     def configure_optimizers(self):
         no_decay = ["bias", "LayerNorm.weight"]
@@ -103,81 +110,51 @@ class NarrativeModel(plt.LightningModule):
     ####################################################################
     # FOR TRAINING PURPOSE
     ####################################################################
-    def get_prediction(self, pairs):
-        pairs = [
-            {
-                "pred": " ".join(self.bert_tokenizer.convert_ids_to_tokens(pred)),
-                "trg": " ".join(self.bert_tokenizer.convert_ids_to_tokens(trg)),
-            }
-            for pred, trg in zip(pairs["pred"], pairs["trg"])
-        ]
-
-        return pairs
 
     def training_step(self, batch, batch_idx: int):
         loss, logist = self.model.do_train(**batch)
-        # logist: list of [b, la, d_vocab]
+        # logist: list of [b, la, d_vocab + lc]
 
         if self.is_tuning is True:
             return {"loss": loss}
 
-        logist = [torch.argmax(logist_, dim=1) for logist_ in logist]
-        trgs_ = [batch["a1_ids"], batch["a2_ids"]] if len(logist) > 1 else [batch["a1_ids"]]
+        logist = [torch.argmax(logist_, dim=-1) for logist_ in logist]
+        oovs = batch["oovs"]
+        trgs_ = [batch["trg1_txt"], batch["trg2_txt"]] if len(logist) > 1 else [batch["trg1_txt"]]
 
         bz = batch["q_ids"].size(0)
-        preds, trgs = [], []
+        preds_txt, trgs_txt = [], []
         for i in range(bz):
-            for output, trg in zip(logist, trgs_):
-                preds.append(output[i])
-                trgs.append(trg[i])
+            for output, trg_txt in zip(logist, trgs_):
+                pred_txt = self.vocab.pred2s(output[i], oovs[i])
+                preds_txt.append(pred_txt)
+                trgs_txt.append(trg_txt[i])
 
-        return {
-            "loss": loss,
-            "pred": preds,
-            "trg": trgs,
-            "size_pred": logist[0].size(-1),
-            "size_trg": trgs_[0].size(-1),
-        }
+        return {"loss": loss, "preds_txt": preds_txt, "trgs_txt": trgs_txt}
 
     def training_step_end(self, batch_parts):
         if self.is_tuning is True:
             return {"loss": batch_parts["loss"].mean()}
 
-        size_pred = (
-            batch_parts["size_pred"]
-            if isinstance(batch_parts["size_pred"], int)
-            else batch_parts["size_pred"][0]
-        )
-        size_trg = (
-            batch_parts["size_trg"]
-            if isinstance(batch_parts["size_trg"], int)
-            else batch_parts["size_trg"][0]
-        )
-
-        preds, trgs = [], []
-        for pred, trg in zip(batch_parts["pred"], batch_parts["trg"]):
-            preds.extend(pred.view(-1, size_pred).cpu().detach())
-            trgs.extend(trg.view(-1, size_trg).cpu().detach())
-
         loss = batch_parts["loss"].mean()
         self.log("train/loss", loss, on_step=True, on_epoch=True)
 
-        return {"loss": loss, "pred": preds, "trg": trgs}
+        preds_txt, trgs_txt = [], []
+        for pred, trg in zip(batch_parts["preds_txt"], batch_parts["trgs_txt"]):
+            preds_txt.append(" ".join(pred))
+            trgs_txt.append(trg)
+
+        return {"loss": loss, "preds_txt": preds_txt, "trgs_txt": trgs_txt}
 
     def training_epoch_end(self, outputs) -> None:
         if self.is_tuning is True:
             return
 
-        pairs = {"pred": [], "trg": []}
-        loss = 0
-        for output in outputs:
-            pairs["pred"].extend(output["pred"])
-            pairs["trg"].extend(output["trg"])
-            loss += output["loss"]
-        outputs = pairs
-
-        ## Calculate B-1, B-4, METEOR and ROUGE-L
-        outputs = self.get_prediction(outputs)
+        outputs = outputs[0]
+        outputs = [
+            {"pred": pred, "trg": trg}
+            for pred, trg in zip(outputs["preds_txt"], outputs["trgs_txt"])
+        ]
 
         with open(self.path_train_pred, "a+") as pred_file:
             json.dump(outputs, pred_file, indent=2, ensure_ascii=False)
@@ -190,58 +167,39 @@ class NarrativeModel(plt.LightningModule):
         self.log("train/rouge_l", rouge_l)
 
     def validation_step(self, batch, batch_idx):
-
         loss, logist = self.model.do_predict(**batch)
         # logist: [b, la]
 
         logist = [logist, logist] if self.use_2_answers else [logist]
-        trgs_ = [batch["a1_ids"], batch["a2_ids"]] if self.use_2_answers else [batch["a1_ids"]]
+        oovs = batch["oovs"]
+        trgs_ = [batch["trg1_txt"], batch["trg2_txt"]] if len(logist) > 1 else [batch["trg1_txt"]]
 
         bz = batch["q_ids"].size(0)
-        preds, trgs = [], []
+        preds_txt, trgs_txt = [], []
         for i in range(bz):
-            for output, trg in zip(logist, trgs_):
-                preds.append(output[i])
-                trgs.append(trg[i])
+            for output, trg_txt in zip(logist, trgs_):
+                pred_txt = self.vocab.pred2s(output[i], oovs[i])
+                preds_txt.append(pred_txt)
+                trgs_txt.append(trg_txt[i])
 
-        return {
-            "loss": loss,
-            "pred": preds,
-            "trg": trgs,
-            "size_pred": logist[0].size(-1),
-            "size_trg": trgs_[0].size(-1),
-        }
+        return {"loss": loss, "preds_txt": preds_txt, "trgs_txt": trgs_txt}
 
     def validation_step_end(self, batch_parts):
-        size_pred = (
-            batch_parts["size_pred"]
-            if isinstance(batch_parts["size_pred"], int)
-            else batch_parts["size_pred"][0]
-        )
-        size_trg = (
-            batch_parts["size_trg"]
-            if isinstance(batch_parts["size_trg"], int)
-            else batch_parts["size_trg"][0]
-        )
-
-        preds, trgs = [], []
-        for pred, trg in zip(batch_parts["pred"], batch_parts["trg"]):
-            preds.extend(pred.view(-1, size_pred).cpu().detach())
-            trgs.extend(trg.view(-1, size_trg).cpu().detach())
-
         loss = batch_parts["loss"].mean()
         self.log("valid/loss", loss, on_step=False, on_epoch=True)
 
-        return {"pred": preds, "trg": trgs}
+        preds_txt, trgs_txt = [], []
+        for pred, trg in zip(batch_parts["preds_txt"], batch_parts["trgs_txt"]):
+            preds_txt.append(" ".join(pred))
+            trgs_txt.append(trg)
+        return {"preds_txt": preds_txt, "trgs_txt": trgs_txt}
 
     def validation_epoch_end(self, outputs) -> None:
-        pairs = {"pred": [], "trg": []}
-        for output in outputs:
-            pairs["pred"].extend(output["pred"])
-            pairs["trg"].extend(output["trg"])
-        outputs = pairs
-
-        outputs = self.get_prediction(outputs)
+        outputs = outputs[0]
+        outputs = [
+            {"pred": pred, "trg": trg}
+            for pred, trg in zip(outputs["preds_txt"], outputs["trgs_txt"])
+        ]
 
         with open(self.path_valid_pred, "a+") as pred_file:
             json.dump(outputs, pred_file, indent=2, ensure_ascii=False)
@@ -254,54 +212,39 @@ class NarrativeModel(plt.LightningModule):
         self.log("valid/rouge_l", rouge_l)
 
     def test_step(self, batch, batch_idx):
-
         _, logist = self.model.do_predict(**batch)
         # logist: [b, la]
 
         logist = [logist, logist] if self.use_2_answers else [logist]
-        trgs_ = [batch["a1_ids"], batch["a2_ids"]] if self.use_2_answers else [batch["a1_ids"]]
+        oovs = batch["oovs"]
+        trgs_ = [batch["trg1_txt"], batch["trg2_txt"]] if len(logist) > 1 else [batch["trg1_txt"]]
 
         bz = batch["q_ids"].size(0)
-        preds, trgs = [], []
+        preds_txt, trgs_txt = [], []
         for i in range(bz):
-            for output, trg in zip(logist, trgs_):
-                preds.append(output[i])
-                trgs.append(trg[i])
+            for output, trg_txt in zip(logist, trgs_):
+                pred_txt = self.vocab.pred2s(output[i], oovs[i])
+                preds_txt.append(pred_txt)
+                trgs_txt.append(trg_txt[i])
 
-        return {
-            "pred": preds,
-            "trg": trgs,
-            "size_pred": logist[0].size(-1),
-            "size_trg": trgs_[0].size(-1),
-        }
+        return {"preds_txt": preds_txt, "trgs_txt": trgs_txt}
 
     def test_step_end(self, batch_parts):
-        size_pred = (
-            batch_parts["size_pred"]
-            if isinstance(batch_parts["size_pred"], int)
-            else batch_parts["size_pred"][0]
-        )
-        size_trg = (
-            batch_parts["size_trg"]
-            if isinstance(batch_parts["size_trg"], int)
-            else batch_parts["size_trg"][0]
-        )
+        loss = batch_parts["loss"].mean()
+        self.log("valid/loss", loss, on_step=False, on_epoch=True)
 
-        preds, trgs = [], []
-        for pred, trg in zip(batch_parts["pred"], batch_parts["trg"]):
-            preds.extend(pred.view(-1, size_pred).cpu().detach())
-            trgs.extend(trg.view(-1, size_trg).cpu().detach())
-
-        return {"pred": preds, "trg": trgs}
+        preds_txt, trgs_txt = [], []
+        for pred, trg in zip(batch_parts["preds_txt"], batch_parts["trgs_txt"]):
+            preds_txt.append(" ".join(pred))
+            trgs_txt.append(trg)
+        return {"preds_txt": preds_txt, "trgs_txt": trgs_txt}
 
     def test_epoch_end(self, outputs) -> None:
-        pairs = {"pred": [], "trg": []}
-        for output in outputs:
-            pairs["pred"].extend(output["pred"])
-            pairs["trg"].extend(output["trg"])
-        outputs = pairs
-
-        outputs = self.get_prediction(outputs)
+        outputs = outputs[0]
+        outputs = [
+            {"pred": pred, "trg": trg}
+            for pred, trg in zip(outputs["preds_txt"], outputs["trgs_txt"])
+        ]
 
         if not self.is_tuning:
             with open(self.path_test_pred, "a+") as pred_file:

@@ -83,7 +83,7 @@ def main(config: DictConfig):
 
     # Init lightning model
     log.info(f"Instantiating model <{config.model._target_}>")
-    model: LightningModule = hydra.utils.instantiate(config.model, num_gpus=trainer.num_gpus)
+    model: LightningModule = hydra.utils.instantiate(config.model)
 
     # Send some parameters from config to all lightning loggers
     log.info("Logging hyperparameters!")
