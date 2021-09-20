@@ -4,6 +4,7 @@ import os
 import pytorch_lightning as plt
 import torch
 import torch.nn as nn
+from torch.optim import Adadelta
 from transformers import AdamW, get_linear_schedule_with_warmup
 from utils.datamodule_utils import Vocab
 from utils.model_utils import get_scores
@@ -67,11 +68,15 @@ class NarrativeModel(plt.LightningModule):
             dropout=dropout,
             path_pretrained=path_pretrained,
             path_vocab=path_vocab,
-            criterion=nn.CrossEntropyLoss(ignore_index=self.vocab.pad_id),
+            criterion=nn.NLLLoss(ignore_index=self.vocab.pad_id),
             device=self.device,
         )
 
         os.makedirs(os.path.dirname(self.path_train_pred), exist_ok=True)
+
+        self.val_results = []
+        self.train_results = []
+        self.test_results = []
 
     def configure_optimizers(self):
         no_decay = ["bias", "LayerNorm.weight"]
@@ -93,7 +98,8 @@ class NarrativeModel(plt.LightningModule):
                 "weight_decay": 0.0,
             },
         ]
-        optimizer = AdamW(params=optimizer_grouped_parameters, lr=self.lr)
+        # optimizer = AdamW(params=optimizer_grouped_parameters, lr=self.lr)
+        optimizer = Adadelta(params=optimizer_grouped_parameters, lr=self.lr, eps=1e-4)
 
         lr_scheduler = {
             "scheduler": get_linear_schedule_with_warmup(
@@ -123,48 +129,36 @@ class NarrativeModel(plt.LightningModule):
         trgs_ = [batch["trg1_txt"], batch["trg2_txt"]] if len(logist) > 1 else [batch["trg1_txt"]]
 
         bz = batch["q_ids"].size(0)
-        preds_txt, trgs_txt = [], []
         for i in range(bz):
             for output, trg_txt in zip(logist, trgs_):
                 pred_txt = self.vocab.pred2s(output[i], oovs[i])
-                preds_txt.append(pred_txt)
-                trgs_txt.append(trg_txt[i])
+                self.train_results.append({"pred": " ".join(pred_txt), "trg": trg_txt[i]})
 
-        return {"loss": loss, "preds_txt": preds_txt, "trgs_txt": trgs_txt}
+        return {"loss": loss}
 
     def training_step_end(self, batch_parts):
-        if self.is_tuning is True:
-            return {"loss": batch_parts["loss"].mean()}
-
         loss = batch_parts["loss"].mean()
-        self.log("train/loss", loss, on_step=True, on_epoch=True)
 
-        preds_txt, trgs_txt = [], []
-        for pred, trg in zip(batch_parts["preds_txt"], batch_parts["trgs_txt"]):
-            preds_txt.append(" ".join(pred))
-            trgs_txt.append(trg)
+        if not self.is_tuning:
+            self.log("train/loss", loss, on_step=True, on_epoch=True)
 
-        return {"loss": loss, "preds_txt": preds_txt, "trgs_txt": trgs_txt}
+        return {"loss": loss}
 
     def training_epoch_end(self, outputs) -> None:
         if self.is_tuning is True:
             return
 
-        outputs = outputs[0]
-        outputs = [
-            {"pred": pred, "trg": trg}
-            for pred, trg in zip(outputs["preds_txt"], outputs["trgs_txt"])
-        ]
-
         with open(self.path_train_pred, "a+") as pred_file:
-            json.dump(outputs, pred_file, indent=2, ensure_ascii=False)
+            json.dump(self.train_results, pred_file, indent=2, ensure_ascii=False)
 
-        bleu_1, bleu_4, meteor, rouge_l = get_scores(outputs)
+        bleu_1, bleu_4, meteor, rouge_l = get_scores(self.train_results)
 
         self.log("train/bleu_1", bleu_1)
         self.log("train/bleu_4", bleu_4)
         self.log("train/meteor", meteor)
         self.log("train/rouge_l", rouge_l)
+
+        self.train_results = []
 
     def validation_step(self, batch, batch_idx):
         loss, logist = self.model.do_predict(**batch)
@@ -175,41 +169,29 @@ class NarrativeModel(plt.LightningModule):
         trgs_ = [batch["trg1_txt"], batch["trg2_txt"]] if len(logist) > 1 else [batch["trg1_txt"]]
 
         bz = batch["q_ids"].size(0)
-        preds_txt, trgs_txt = [], []
         for i in range(bz):
             for output, trg_txt in zip(logist, trgs_):
                 pred_txt = self.vocab.pred2s(output[i], oovs[i])
-                preds_txt.append(pred_txt)
-                trgs_txt.append(trg_txt[i])
+                self.val_results.append({"pred": " ".join(pred_txt), "trg": trg_txt[i]})
 
-        return {"loss": loss, "preds_txt": preds_txt, "trgs_txt": trgs_txt}
+        return {"loss": loss}
 
     def validation_step_end(self, batch_parts):
         loss = batch_parts["loss"].mean()
         self.log("valid/loss", loss, on_step=False, on_epoch=True)
 
-        preds_txt, trgs_txt = [], []
-        for pred, trg in zip(batch_parts["preds_txt"], batch_parts["trgs_txt"]):
-            preds_txt.append(" ".join(pred))
-            trgs_txt.append(trg)
-        return {"preds_txt": preds_txt, "trgs_txt": trgs_txt}
-
     def validation_epoch_end(self, outputs) -> None:
-        outputs = outputs[0]
-        outputs = [
-            {"pred": pred, "trg": trg}
-            for pred, trg in zip(outputs["preds_txt"], outputs["trgs_txt"])
-        ]
-
         with open(self.path_valid_pred, "a+") as pred_file:
-            json.dump(outputs, pred_file, indent=2, ensure_ascii=False)
+            json.dump(self.val_results, pred_file, indent=2, ensure_ascii=False)
 
-        bleu_1, bleu_4, meteor, rouge_l = get_scores(outputs)
+        bleu_1, bleu_4, meteor, rouge_l = get_scores(self.val_results)
 
         self.log("valid/bleu_1", bleu_1)
         self.log("valid/bleu_4", bleu_4)
         self.log("valid/meteor", meteor)
         self.log("valid/rouge_l", rouge_l)
+
+        self.val_results = []
 
     def test_step(self, batch, batch_idx):
         _, logist = self.model.do_predict(**batch)
@@ -220,39 +202,21 @@ class NarrativeModel(plt.LightningModule):
         trgs_ = [batch["trg1_txt"], batch["trg2_txt"]] if len(logist) > 1 else [batch["trg1_txt"]]
 
         bz = batch["q_ids"].size(0)
-        preds_txt, trgs_txt = [], []
         for i in range(bz):
             for output, trg_txt in zip(logist, trgs_):
                 pred_txt = self.vocab.pred2s(output[i], oovs[i])
-                preds_txt.append(pred_txt)
-                trgs_txt.append(trg_txt[i])
-
-        return {"preds_txt": preds_txt, "trgs_txt": trgs_txt}
-
-    def test_step_end(self, batch_parts):
-        loss = batch_parts["loss"].mean()
-        self.log("valid/loss", loss, on_step=False, on_epoch=True)
-
-        preds_txt, trgs_txt = [], []
-        for pred, trg in zip(batch_parts["preds_txt"], batch_parts["trgs_txt"]):
-            preds_txt.append(" ".join(pred))
-            trgs_txt.append(trg)
-        return {"preds_txt": preds_txt, "trgs_txt": trgs_txt}
+                self.test_results.append({"pred": " ".join(pred_txt), "trg": trg_txt[i]})
 
     def test_epoch_end(self, outputs) -> None:
-        outputs = outputs[0]
-        outputs = [
-            {"pred": pred, "trg": trg}
-            for pred, trg in zip(outputs["preds_txt"], outputs["trgs_txt"])
-        ]
-
         if not self.is_tuning:
             with open(self.path_test_pred, "a+") as pred_file:
-                json.dump(outputs, pred_file, indent=2, ensure_ascii=False)
+                json.dump(self.test_results, pred_file, indent=2, ensure_ascii=False)
 
-        bleu_1, bleu_4, meteor, rouge_l = get_scores(outputs)
+        bleu_1, bleu_4, meteor, rouge_l = get_scores(self.test_results)
 
         self.log("bleu_1", bleu_1)
         self.log("bleu_4", bleu_4)
         self.log("meteor", meteor)
         self.log("rouge_l", rouge_l)
+
+        self.test_results = []

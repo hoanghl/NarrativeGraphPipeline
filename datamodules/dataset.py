@@ -60,8 +60,7 @@ class NarrativeDataset(Dataset):
         with open(path_data.replace("[SPLIT]", split), "rb") as f:
             data = pickle.load(f)
 
-        # FIXME: Remove this limit
-        for entry in data[:200]:
+        for entry in data:
             q = self.vocab.stoi(entry["q"])
             q = self._trunc(q, self.lq)
             q_ids, q_masks = self._pad(q, self.lq)

@@ -85,7 +85,7 @@ PATH:
 mode: train
 multigpu: False
 
-batch_size: 8
+batch_size: 16
 n_workers: 8
 
 lq: 35
@@ -124,15 +124,15 @@ model:
   lc: ${lc}
   la: ${la}
   nc: ${nc}
-  d_embd: 50
+  d_embd: 300
   d_hid: 128
   d_vocab: 30975
   num_layers: 5
   block: 200
-  lr: 1e-5
-  w_decay: 1e-2
+  lr: 1e-4
+  w_decay: 0.95
   dropout: 0.15
-  warmup_rate: 0.25
+  warmup_rate: 0.3
   max_epochs: ${trainer.max_epochs}
   size_dataset_train: ${sizes_dataset.train}
   path_pretrained: ${PATH.pretrained}

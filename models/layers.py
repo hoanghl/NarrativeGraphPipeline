@@ -159,7 +159,7 @@ class AttnPooling(nn.Module):
 
         a = self.ff_attn(self.lin_att1(q) + self.lin_att2(ai).unsqueeze(1)).squeeze(-1)
         # [bz, lq]
-        a = a.float().masked_fill_(q_masks, 1e-8).type_as(q)
+        a = a.float().masked_fill_(q_masks == 0, float("-inf")).type_as(q)
         a = a.softmax(-1)
 
         h = (q * a.unsqueeze(-1)).sum(dim=1)
@@ -224,7 +224,7 @@ class PGN(nn.Module):
             at = self.ff3(h_ + Y + self.attn_pooling(ai, q, q_masks).unsqueeze(1)).squeeze(-1)
             # [bz, lc]
             ## Mask padding positions
-            at = at.float().masked_fill_(c_masks, 1e-8).type_as(q)
+            at = at.float().masked_fill_(c_masks == 0, float("-inf")).type_as(q)
             at = at.softmax(-1)
             y = (at.unsqueeze(-1) * Y).sum(dim=1)
             # [bz, d_hid]
@@ -310,7 +310,7 @@ class PGN(nn.Module):
                 ).squeeze(-1)
                 # [1, lc]
                 ## Mask padding positions
-                at = at.float().masked_fill_(c_masks_, 1e-8).type_as(q)
+                at = at.float().masked_fill_(c_masks_ == 0, float("-inf")).type_as(q)
                 at = at.softmax(-1)
                 y = (at.unsqueeze(-1) * Y_).sum(dim=1)
                 # [1, d_hid]
