@@ -1,5 +1,11 @@
 ### This file contains changes and modifications during developing.
 
+## Sep 20, 11:50
+
+- Fix error in transposing result
+- Apply new method of storing results after step
+- Change some configs
+
 ## Sep 7, 17:04
 
 - Apply **DP** instead of old **DDP** for _multi training_

@@ -116,7 +116,7 @@ trainer:
   accelerator: null
   replace_sampler_ddp: False
   min_epochs: 1
-  max_epochs: 50
+  max_epochs: 60
   auto_lr_find: False
   terminate_on_nan: True
   log_every_n_steps: 40
@@ -138,12 +138,12 @@ model:
   num_heads_persistent: 4
   num_layers_q: 2
   num_layers_p: 4
-  num_layers_a: 4
+  num_layers_a: 6
   d_bert: 768
   d_hid: 256
   d_vocab: 30522
   lr: 1e-5
-  w_decay: 0.9
+  w_decay: 0.95
   dropout: 0.2
   size_dataset_train: ${sizes_dataset.train}
   max_epochs: ${trainer.max_epochs}
@@ -191,7 +191,7 @@ logger:
   wandb:
     _target_: pytorch_lightning.loggers.wandb.WandbLogger
     project: "narrative_weam"
-    name: ${now:%A %b-%d %H:%M}_tune
+    name: ${now:%A %b-%d %H:%M}
     save_dir: "."
     offline: False # set True to store all logs only locally
     id: null # pass correct id to resume experiment!

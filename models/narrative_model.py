@@ -80,14 +80,9 @@ class NarrativeModel(plt.LightningModule):
             device=self.device,
         )
 
-        # ## Freeeze some parameters
-        # list_freeze_sets = [
-        #     # self.embd_layer.bert_emb.parameters(),
-        #     # self.ans_infer.decoder.parameters(),
-        # ]
-        # for params in list_freeze_sets:
-        #     for param in params:
-        #         param.requires_grad = False
+        self.val_results = []
+        self.train_results = []
+        self.test_results = []
 
     def configure_optimizers(self):
         no_decay = ["bias", "LayerNorm.weight"]
@@ -128,17 +123,6 @@ class NarrativeModel(plt.LightningModule):
     # FOR TRAINING PURPOSE
     ####################################################################
 
-    def get_prediction(self, pairs):
-        pairs = [
-            {
-                "pred": " ".join(self.bert_tokenizer.convert_ids_to_tokens(pred)),
-                "trg": " ".join(self.bert_tokenizer.convert_ids_to_tokens(trg)),
-            }
-            for pred, trg in zip(pairs["pred"], pairs["trg"])
-        ]
-
-        return pairs
-
     def training_step(self, batch: Any, batch_idx: int):
         loss, logist = self.model.do_train(
             q=batch["q_ids"],
@@ -149,77 +133,52 @@ class NarrativeModel(plt.LightningModule):
             a2_mask=batch["a2_masks"],
             use_2_ans=self.use_2_answers,
         )
-        # logist: list of [b, la, d_vocab]
+        # logist: list of [b, la + 2, d_vocab]
 
-        if not self.is_tuning:
-            logist = [torch.argmax(logist_, dim=-1) for logist_ in logist]
-            trgs_ = [batch["a1_ids"], batch["a2_ids"]] if self.use_2_answers else [batch["a1_ids"]]
+        if self.is_tuning is True:
+            return {"loss": loss}
 
-            bz = batch["q_ids"].size(0)
-            preds, trgs = [], []
-            for i in range(bz):
-                for output, trg in zip(logist, trgs_):
-                    preds.append(output[i])
-                    trgs.append(trg[i])
+        logist = [torch.argmax(logist_, dim=-1) for logist_ in logist]
+        trgs_ = [batch["a1_ids"], batch["a2_ids"]] if self.use_2_answers else [batch["a1_ids"]]
 
-            return {
-                "loss": loss,
-                "pred": preds,
-                "trg": trgs,
-                "size_pred": logist[0].size(-1),
-                "size_trg": trgs_[0].size(-1),
-            }
+        bz = batch["q_ids"].size(0)
+        preds, trgs = [], []
+        for i in range(bz):
+            for output, trg in zip(logist, trgs_):
+                preds.append(output[i])
+                trgs.append(trg[i])
+                self.train_results.append(
+                    {
+                        "pred": " ".join(self.bert_tokenizer.convert_ids_to_tokens(output[i])),
+                        "trg": " ".join(self.bert_tokenizer.convert_ids_to_tokens(trg[i])),
+                    }
+                )
+
         return {"loss": loss}
 
     def training_step_end(self, batch_parts):
-        if self.is_tuning is True:
-            return {"loss": batch_parts["loss"].mean()}
-
-        size_pred = (
-            batch_parts["size_pred"]
-            if isinstance(batch_parts["size_pred"], int)
-            else batch_parts["size_pred"][0]
-        )
-        size_trg = (
-            batch_parts["size_trg"]
-            if isinstance(batch_parts["size_trg"], int)
-            else batch_parts["size_trg"][0]
-        )
-
-        preds, trgs = [], []
-        for pred, trg in zip(batch_parts["pred"], batch_parts["trg"]):
-            preds.extend(pred.view(-1, size_pred).cpu().detach())
-            trgs.extend(trg.view(-1, size_trg).cpu().detach())
-
         loss = batch_parts["loss"].mean()
-        self.log("train/loss", loss, on_step=True, on_epoch=True)
 
-        return {"loss": loss, "pred": preds, "trg": trgs}
+        if not self.is_tuning:
+            self.log("train/loss", loss, on_step=True, on_epoch=True)
+
+        return {"loss": loss}
 
     def training_epoch_end(self, outputs) -> None:
         if self.is_tuning is True:
             return
 
-        pairs = {"pred": [], "trg": []}
-        loss = 0
-        for output in outputs:
-            pairs["pred"].extend(output["pred"])
-            pairs["trg"].extend(output["trg"])
-            loss += output["loss"]
-        outputs = pairs
-
-        ## Calculate B-1, B-4, METEOR and ROUGE-L
-        outputs = self.get_prediction(outputs)
-
         with open(self.path_train_pred, "a+") as pred_file:
-            json.dump(outputs, pred_file, indent=2, ensure_ascii=False)
+            json.dump(self.train_results, pred_file, indent=2, ensure_ascii=False)
 
-        bleu_1, bleu_4, meteor, rouge_l = get_scores(outputs)
+        bleu_1, bleu_4, meteor, rouge_l = get_scores(self.train_results)
 
         self.log("train/bleu_1", bleu_1)
         self.log("train/bleu_4", bleu_4)
         self.log("train/meteor", meteor)
         self.log("train/rouge_l", rouge_l)
+
+        self.train_results = []
 
     def validation_step(self, batch: Any, batch_idx):
         logist = self.model.do_predict(batch["q_ids"], batch["c_ids"], self.la)
@@ -234,51 +193,25 @@ class NarrativeModel(plt.LightningModule):
             for output, trg in zip(logist, trgs_):
                 preds.append(output[i])
                 trgs.append(trg[i])
-
-        return {
-            "pred": preds,
-            "trg": trgs,
-            "size_pred": logist[0].size(-1),
-            "size_trg": trgs_[0].size(-1),
-        }
-
-    def validation_step_end(self, batch_parts):
-        size_pred = (
-            batch_parts["size_pred"]
-            if isinstance(batch_parts["size_pred"], int)
-            else batch_parts["size_pred"][0]
-        )
-        size_trg = (
-            batch_parts["size_trg"]
-            if isinstance(batch_parts["size_trg"], int)
-            else batch_parts["size_trg"][0]
-        )
-
-        preds, trgs = [], []
-        for pred, trg in zip(batch_parts["pred"], batch_parts["trg"]):
-            preds.extend(pred.view(-1, size_pred).cpu().detach())
-            trgs.extend(trg.view(-1, size_trg).cpu().detach())
-
-        return {"pred": preds, "trg": trgs}
+                self.val_results.append(
+                    {
+                        "pred": " ".join(self.bert_tokenizer.convert_ids_to_tokens(output[i])),
+                        "trg": " ".join(self.bert_tokenizer.convert_ids_to_tokens(trg[i])),
+                    }
+                )
 
     def validation_epoch_end(self, outputs) -> None:
-        pairs = {"pred": [], "trg": []}
-        for output in outputs:
-            pairs["pred"].extend(output["pred"])
-            pairs["trg"].extend(output["trg"])
-        outputs = pairs
-
-        outputs = self.get_prediction(outputs)
-
         with open(self.path_valid_pred, "a+") as pred_file:
-            json.dump(outputs, pred_file, indent=2, ensure_ascii=False)
+            json.dump(self.val_results, pred_file, indent=2, ensure_ascii=False)
 
-        bleu_1, bleu_4, meteor, rouge_l = get_scores(outputs)
+        bleu_1, bleu_4, meteor, rouge_l = get_scores(self.val_results)
 
         self.log("valid/bleu_1", bleu_1)
         self.log("valid/bleu_4", bleu_4)
         self.log("valid/meteor", meteor)
         self.log("valid/rouge_l", rouge_l)
+
+        self.val_results = []
 
     def test_step(self, batch, batch_idx):
         logist = self.model.do_predict(batch["q_ids"], batch["c_ids"], self.la)
@@ -293,49 +226,22 @@ class NarrativeModel(plt.LightningModule):
             for output, trg in zip(logist, trgs_):
                 preds.append(output[i])
                 trgs.append(trg[i])
-
-        return {
-            "pred": preds,
-            "trg": trgs,
-            "size_pred": logist[0].size(-1),
-            "size_trg": trgs_[0].size(-1),
-        }
-
-    def test_step_end(self, batch_parts):
-        size_pred = (
-            batch_parts["size_pred"]
-            if isinstance(batch_parts["size_pred"], int)
-            else batch_parts["size_pred"][0]
-        )
-        size_trg = (
-            batch_parts["size_trg"]
-            if isinstance(batch_parts["size_trg"], int)
-            else batch_parts["size_trg"][0]
-        )
-
-        preds, trgs = [], []
-        for pred, trg in zip(batch_parts["pred"], batch_parts["trg"]):
-            preds.extend(pred.view(-1, size_pred).cpu().detach())
-            trgs.extend(trg.view(-1, size_trg).cpu().detach())
-
-        return {"pred": preds, "trg": trgs}
+                self.test_results.append(
+                    {
+                        "pred": " ".join(self.bert_tokenizer.convert_ids_to_tokens(output[i])),
+                        "trg": " ".join(self.bert_tokenizer.convert_ids_to_tokens(trg[i])),
+                    }
+                )
 
     def test_epoch_end(self, outputs) -> None:
-        pairs = {"pred": [], "trg": []}
-        for output in outputs:
-            pairs["pred"].extend(output["pred"])
-            pairs["trg"].extend(output["trg"])
-        outputs = pairs
+        with open(self.path_valid_pred, "a+") as pred_file:
+            json.dump(self.test_results, pred_file, indent=2, ensure_ascii=False)
 
-        outputs = self.get_prediction(outputs)
-
-        if not self.is_tuning:
-            with open(self.path_test_pred, "a+") as pred_file:
-                json.dump(outputs, pred_file, indent=2, ensure_ascii=False)
-
-        bleu_1, bleu_4, meteor, rouge_l = get_scores(outputs)
+        bleu_1, bleu_4, meteor, rouge_l = get_scores(self.test_results)
 
         self.log("bleu_1", bleu_1)
         self.log("bleu_4", bleu_4)
         self.log("meteor", meteor)
         self.log("rouge_l", rouge_l)
+
+        self.test_results = []

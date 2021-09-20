@@ -80,21 +80,21 @@ class Backbone(torch_nn.Module):
     ):
         loss = 0
         for output, trg in zip(output_mle, trgs):
-            loss_mle = self.criterion(output, trg)
+            loss_mle = self.criterion(output.transpose(-1, -2), trg)
 
             loss += loss_mle
 
             if is_loss_ot:
                 trg = self.embedding.encoder(trg)[0]
                 pred = (
-                    torch.softmax(output.transpose(-1, -2), dim=-1)
+                    torch.softmax(output, dim=-1)
                     @ self.embedding.encoder.embeddings.word_embeddings.weight
                 )
                 loss_ot = ipot(pred, trg, max_iter=400)
                 loss += gamma * loss_ot
 
             if is_loss_bert:
-                output = torch.softmax(output.transpose(-1, -2), dim=-1)
+                output = torch.softmax(output, dim=-1)
                 loss_bert = eta * self.bertloss(
                     pred=output[:, 1:-1],
                     a1_ids=a1_ids,
@@ -139,7 +139,7 @@ class Backbone(torch_nn.Module):
         output_mle = self.decoder(a_mem)
         # [b, la + 2, d_vocab]
 
-        return output_mle.transpose(1, 2), trgs
+        return output_mle, trgs
 
     def do_train(self, q, c, a1, a2=None, a1_mask=None, a2_mask=None, use_2_ans=False):
         output_mle, trgs = [], []
