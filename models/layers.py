@@ -3,9 +3,9 @@ import json
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from datamodules.dataset import Vocab
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
+from torch_scatter import scatter
 
 
 class Embedding(nn.Module):
@@ -197,10 +197,73 @@ class PGN(nn.Module):
         self.ff3 = nn.Sequential(NonLinear(d_hid, dropout), nn.Linear(d_hid, 1))
         self.lin1 = nn.Linear(d_embd, d_hid, bias=False)
         self.lstm = nn.LSTM(2 * d_hid, d_hid, num_layers, batch_first=True, dropout=dropout)
-        self.lin_pgn = nn.Linear(d_hid, d_vocab)
-        self.lin_pgn1 = nn.Linear(d_hid, 1)
-        self.lin_pgn2 = nn.Linear(d_hid, 1)
-        self.lin_pgn3 = nn.Linear(d_hid, 1)
+        self.lin_pgn = nn.Linear(d_hid * num_layers, d_vocab)
+
+    def maxout(self, at, c_ids_ext):
+        bz = at.size(0)
+
+        oov_at = torch.where(
+            c_ids_ext >= self.d_vocab, at, torch.tensor(0, dtype=at.dtype, device=at.device)
+        )
+        c_ids_ext_ = torch.where(
+            c_ids_ext >= self.d_vocab,
+            c_ids_ext - self.d_vocab,
+            torch.tensor(0, dtype=c_ids_ext.dtype, device=at.device),
+        )
+        maxout_at = scatter(
+            oov_at, c_ids_ext_, -1, reduce="max", out=torch.ones_like(oov_at) * float("-inf")
+        )
+
+        a0 = torch.zeros_like(maxout_at)
+        for b in range(bz):
+            a0[b, :] = torch.index_select(maxout_at[b], -1, c_ids_ext_[b])
+
+        maxout_at = torch.where(a0 != 0, a0, torch.tensor([float("-inf")], device=at.device))
+
+        return maxout_at
+
+    def forward(self, Y, h, c, ai, q, q_masks, c_ids_ext, c_masks):
+        bz = Y.size(0)
+
+        ## Attention over Y
+        h_ = self.ff1(h.transpose(0, 1).sum(dim=1)).unsqueeze(1) if torch.is_tensor(h) else 0
+        at = self.ff3(h_ + Y + self.attn_pooling(ai, q, q_masks).unsqueeze(1)).squeeze(-1)
+        # [bz, lc]
+        ## Mask padding positions
+        at = at.float().masked_fill_(c_masks == 0, float("-inf")).type_as(q)
+        # at not softmax yet
+        y = (at.softmax(-1).unsqueeze(-1) * Y).sum(dim=1)
+        # [bz, d_hid]
+
+        ## Pass over LSTM
+        _, (h, c) = (
+            self.lstm(torch.cat((y, ai), -1).unsqueeze(1), (h, c))
+            if torch.is_tensor(h)
+            else self.lstm(torch.cat((y, ai), -1).unsqueeze(1))
+        )
+        # h, c: [num_layers, bz, d_hid]
+
+        vt = self.lin_pgn(h.transpose(0, 1).reshape(bz, -1))
+        # [bz, d_vocab]
+        # vt not softmax yet
+
+        ## Start Maxout PGN
+        maxout_at = self.maxout(at, c_ids_ext)
+        # [bz, lc]
+
+        tmp = torch.cat((vt, maxout_at), -1)
+        # [bz, d_vocab + lc]
+        tmp = tmp.softmax(-1)
+        vt, maxout_at = tmp[:, : self.d_vocab], tmp[:, self.d_vocab :]
+
+        zeros = torch.zeros_like(at)
+        extended_vt = torch.cat((vt, zeros), -1)
+        # [bz, d_vocab + lc]
+
+        wt = extended_vt.scatter_add(dim=-1, index=c_ids_ext, src=maxout_at)
+        # [bz, d_vocab + lc]
+
+        return wt, h, c
 
     def do_train(self, Y, q, q_masks, a, c_ids_ext, c_masks):
         # Y: [bz, lc, 2 * d_hid]
@@ -219,45 +282,9 @@ class PGN(nn.Module):
         for i in range(self.la):
             ai = a[:, i]
 
-            ## Attention over Y
-            h_ = self.ff1(h.transpose(0, 1).sum(dim=1)).unsqueeze(1) if torch.is_tensor(h) else 0
-            at = self.ff3(h_ + Y + self.attn_pooling(ai, q, q_masks).unsqueeze(1)).squeeze(-1)
-            # [bz, lc]
-            ## Mask padding positions
-            at = at.float().masked_fill_(c_masks == 0, float("-inf")).type_as(q)
-            at = at.softmax(-1)
-            y = (at.unsqueeze(-1) * Y).sum(dim=1)
-            # [bz, d_hid]
+            wt, h, c = self(Y, h, c, ai, q, q_masks, c_ids_ext, c_masks)
 
-            ## Pass over LSTM
-            _, (h, c) = (
-                self.lstm(torch.cat((y, ai), -1).unsqueeze(1), (h, c))
-                if torch.is_tensor(h)
-                else self.lstm(torch.cat((y, ai), -1).unsqueeze(1))
-            )
-            # h, c: [num_layers, bz, d_hid]
-
-            ## PGN
-            h_, c_ = h.transpose(0, 1).sum(dim=1), c.transpose(0, 1).sum(dim=1)
-            pt = F.sigmoid(self.lin_pgn1(c_) + self.lin_pgn2(h_) + self.lin_pgn3(y))
-            # [bz, 1]
-
-            vt = self.lin_pgn(h_)
-            # [bz, d_vocab]
-            vt = vt.softmax(-1)
-            vt = (1 - pt) * vt
-
-            at = pt * at
-
-            ## Padd zeros to vt for OOV positions
-            extra_zeros = torch.zeros_like(at)
-            extended_vt = torch.cat((vt, extra_zeros), dim=-1)
-            # [bz, d_vocab + lc]
-
-            wt = extended_vt.scatter_add(-1, index=c_ids_ext, src=at)
-            # [bz, d_vocab + lc]
-
-            outputs.append(wt.unsqueeze(1))
+            outputs.append(wt.unsqueeze(1).softmax(-1))
 
         output_mle = torch.cat(outputs, 1)
         # [b, la, d_vocab + lc]
@@ -299,49 +326,7 @@ class PGN(nn.Module):
                 last_tok = self.lin1(last_tok)
                 # [1, d_hid]
 
-                ## Attention over Y
-                h_ = (
-                    self.ff1(h.transpose(0, 1).sum(dim=1)).unsqueeze(1)
-                    if torch.is_tensor(h)
-                    else 0
-                )
-                at = self.ff3(
-                    h_ + Y_ + self.attn_pooling(last_tok, q_, q_masks_).unsqueeze(1)
-                ).squeeze(-1)
-                # [1, lc]
-                ## Mask padding positions
-                at = at.float().masked_fill_(c_masks_ == 0, float("-inf")).type_as(q)
-                at = at.softmax(-1)
-                y = (at.unsqueeze(-1) * Y_).sum(dim=1)
-                # [1, d_hid]
-
-                ## Pass over LSTM
-                _, (h, c) = (
-                    self.lstm(torch.cat((y, last_tok), -1).unsqueeze(1), (h, c))
-                    if torch.is_tensor(h)
-                    else self.lstm(torch.cat((y, last_tok), -1).unsqueeze(1))
-                )
-                # h, c: [num_layers, 1, d_hid]
-
-                ## PGN
-                h_, c_ = h.transpose(0, 1).sum(dim=1), c.transpose(0, 1).sum(dim=1)
-                pt = F.sigmoid(self.lin_pgn1(c_) + self.lin_pgn2(h_) + self.lin_pgn3(y))
-                # [1, 1]
-
-                vt = self.lin_pgn(h_)
-                # [1, d_vocab]
-                vt = vt.softmax(-1)
-                vt = (1 - pt) * vt
-
-                at = pt * at
-
-                ## Padd zeros to vt for OOV positions
-                extra_zeros = torch.zeros_like(at)
-                extended_vt = torch.cat((vt, extra_zeros), dim=-1)
-                # [1, d_vocab + lc]
-
-                wt = extended_vt.scatter_add(-1, index=c_ids_ext_, src=at)
-                # [1, d_vocab + lc]
+                wt, h, c = self(Y_, h, c, last_tok, q_, q_masks_, c_ids_ext_, c_masks_)
 
                 pred_tok = wt.argmax(-1)
                 # [1]

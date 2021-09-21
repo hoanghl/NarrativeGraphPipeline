@@ -54,7 +54,7 @@ class Backbone(nn.Module):
 
         loss = 0
         for output, trg in zip(output_mle, trgs):
-            loss_mle = self.criterion(output.transpose(-1, -2), trg)
+            loss_mle = self.criterion(torch.log(output).transpose(-1, -2), trg)
 
             if is_loss_ot:
                 trg = self.encoder(trg)

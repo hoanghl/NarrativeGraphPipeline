@@ -104,7 +104,7 @@ trainer:
   accelerator: null
   replace_sampler_ddp: False
   min_epochs: 1
-  max_epochs: 60
+  max_epochs: 50
   auto_lr_find: False
   terminate_on_nan: True
   log_every_n_steps: 40
@@ -131,8 +131,8 @@ model:
   block: 200
   lr: 1e-4
   w_decay: 0.95
-  dropout: 0.15
-  warmup_rate: 0.3
+  dropout: 0.2
+  warmup_rate: 0.18
   max_epochs: ${trainer.max_epochs}
   size_dataset_train: ${sizes_dataset.train}
   path_pretrained: ${PATH.pretrained}
