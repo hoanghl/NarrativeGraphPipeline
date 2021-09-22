@@ -124,7 +124,7 @@ model:
   lc: ${lc}
   la: ${la}
   nc: ${nc}
-  d_embd: 300
+  d_embd: 50
   d_hid: 128
   d_vocab: 30975
   num_layers: 5

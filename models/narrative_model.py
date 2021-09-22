@@ -50,16 +50,14 @@ class NarrativeModel(plt.LightningModule):
         self.n_training_steps = size_dataset_train // batch_size * max_epochs
         self.use_2_answers = use_2_answers
         self.is_tuning = is_tuning
-        self.vocab = Vocab(path_vocab)
+        self.vocab = Vocab.from_json(path_vocab)
 
         #############################
         # Define model
         #############################
         self.model = Backbone(
-            batch_size=batch_size,
             la=la,
             lc=lc,
-            nc=nc,
             d_embd=d_embd,
             d_hid=d_hid,
             d_vocab=d_vocab,
@@ -67,9 +65,8 @@ class NarrativeModel(plt.LightningModule):
             block=block,
             dropout=dropout,
             path_pretrained=path_pretrained,
-            path_vocab=path_vocab,
-            criterion=nn.NLLLoss(ignore_index=self.vocab.pad_id),
-            device=self.device,
+            criterion=nn.NLLLoss(ignore_index=self.vocab.pad()),
+            vocab=self.vocab,
         )
 
         os.makedirs(os.path.dirname(self.path_train_pred), exist_ok=True)
@@ -118,21 +115,41 @@ class NarrativeModel(plt.LightningModule):
     ####################################################################
 
     def training_step(self, batch, batch_idx: int):
-        loss, logist = self.model.do_train(**batch)
+        # TODO: Later, enbale using second answer
+        # FIXME: Fix dec_inp2_ids and dec_trg2_ids
+        loss, logist = self.model.do_train(
+            q_ids=batch.q_input,
+            q_masks=batch.q_pad_mask,
+            q_len=batch.q_len,
+            c_ids=batch.c_input,
+            c_ids_ext=batch.c_input_ext,
+            c_masks=batch.c_pad_mask,
+            c_len=batch.c_len,
+            dec_inp1_ids=batch.dec_input,
+            dec_inp2_ids=batch.dec_input,
+            dec_trg1_ids=batch.dec_target,
+            dec_trg2_ids=batch.dec_target,
+            max_oov_len=batch.max_oov_len,
+        )
         # logist: list of [b, la, d_vocab + lc]
 
         if self.is_tuning is True:
             return {"loss": loss}
 
         logist = [torch.argmax(logist_, dim=-1) for logist_ in logist]
-        oovs = batch["oovs"]
-        trgs_ = [batch["trg1_txt"], batch["trg2_txt"]] if len(logist) > 1 else [batch["trg1_txt"]]
+        src_oovs = batch.src_oovs
+        trgs_ = [batch.a_text, batch.a_text] if self.use_2_answers else [batch.a_text]
 
-        bz = batch["q_ids"].size(0)
+        bz = batch.q_input.size(0)
         for i in range(bz):
+            # for output, trg_txt in zip(logist, trgs_):
+            # pred_txt = self.vocab.pred2s(output[i], oovs[i])
+            # self.train_results.append({"pred": " ".join(pred_txt), "trg": trg_txt[i]})
             for output, trg_txt in zip(logist, trgs_):
-                pred_txt = self.vocab.pred2s(output[i], oovs[i])
-                self.train_results.append({"pred": " ".join(pred_txt), "trg": trg_txt[i]})
+                pred_txt = self.vocab.outputids2words(output[i], src_oovs[i])
+                self.train_results.append(
+                    {"pred": " ".join(pred_txt), "trg": " ".join(trg_txt[i])}
+                )
 
         return {"loss": loss}
 
@@ -161,18 +178,27 @@ class NarrativeModel(plt.LightningModule):
         self.train_results = []
 
     def validation_step(self, batch, batch_idx):
-        loss, logist = self.model.do_predict(**batch)
+        loss, outputs = self.model.do_predict(
+            q_ids=batch.q_input,
+            q_len=batch.q_len,
+            q_masks=batch.q_pad_mask,
+            c_ids=batch.c_input,
+            c_ids_ext=batch.c_input_ext,
+            c_masks=batch.c_pad_mask,
+            c_len=batch.c_len,
+            dec_trg1_ids=batch.dec_target,
+            dec_trg2_ids=batch.dec_target,
+            max_oov_len=batch.max_oov_len,
+        )
         # logist: [b, la]
 
-        logist = [logist, logist] if self.use_2_answers else [logist]
-        oovs = batch["oovs"]
-        trgs_ = [batch["trg1_txt"], batch["trg2_txt"]] if len(logist) > 1 else [batch["trg1_txt"]]
+        outputs = [outputs, outputs] if self.use_2_answers else [outputs]
+        src_oovs = batch.src_oovs
+        trgs_ = [batch.a_text, batch.a_text] if self.use_2_answers else [batch.a_text]
 
-        bz = batch["q_ids"].size(0)
-        for i in range(bz):
-            for output, trg_txt in zip(logist, trgs_):
-                pred_txt = self.vocab.pred2s(output[i], oovs[i])
-                self.val_results.append({"pred": " ".join(pred_txt), "trg": trg_txt[i]})
+        for output, trg_txt in zip(outputs, trgs_):
+            pred_txt = self.vocab.outputids2words(output[0], src_oovs[0])
+            self.val_results.append({"pred": " ".join(pred_txt), "trg": " ".join(trg_txt[0])})
 
         return {"loss": loss}
 

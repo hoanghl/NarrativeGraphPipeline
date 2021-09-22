@@ -1,5 +1,3 @@
-from re import A
-
 import torch
 import torch.nn as nn
 from utils.model_utils import ipot
@@ -10,10 +8,8 @@ from models.layers import PGN, Embedding, IntrospectiveAlignmentLayer
 class Backbone(nn.Module):
     def __init__(
         self,
-        batch_size,
         la,
         lc,
-        nc,
         d_embd,
         d_hid,
         d_vocab,
@@ -21,25 +17,27 @@ class Backbone(nn.Module):
         block,
         dropout,
         path_pretrained,
-        path_vocab,
         criterion,
-        device,
+        vocab,
     ):
         super().__init__()
 
         self.d_vocab = d_vocab
         self.lc = lc
 
-        self.embedding = Embedding(d_embd, d_hid, path_pretrained, path_vocab, num_layers, dropout)
-        self.ial = IntrospectiveAlignmentLayer(batch_size, lc, d_hid, dropout, block, device)
-        self.pgn = PGN(la, d_embd, d_hid, d_vocab, num_layers, dropout, path_vocab, self.embedding)
+        self.embedding = Embedding(d_embd, d_hid, path_pretrained, num_layers, dropout, vocab)
+        self.ial = IntrospectiveAlignmentLayer(d_hid, dropout, block)
+        self.pgn = PGN(la, d_embd, d_hid, d_vocab, num_layers, dropout, self.embedding, vocab)
 
         self.criterion = criterion
 
-    def _ids2dist(self, inputs):
+    def _ids2dist(self, inputs, max_oov_len):
         indices = inputs.unsqueeze(-1)
         a = torch.full(
-            (*inputs.size(), self.d_vocab + self.lc), 1e-6, dtype=torch.float, device=inputs.device
+            (*inputs.size(), self.d_vocab + max_oov_len),
+            1e-6,
+            dtype=torch.float,
+            device=inputs.device,
         )
         a.scatter_(
             dim=-1,
@@ -54,7 +52,7 @@ class Backbone(nn.Module):
 
         loss = 0
         for output, trg in zip(output_mle, trgs):
-            loss_mle = self.criterion(output.transpose(-1, -2), trg)
+            loss_mle = self.criterion(torch.log(output.transpose(-1, -2)), trg)
 
             if is_loss_ot:
                 trg = self.encoder(trg)
@@ -74,13 +72,16 @@ class Backbone(nn.Module):
         self,
         q_ids,
         q_masks,
+        q_len,
         c_ids,
         c_ids_ext,
         c_masks,
+        c_len,
         dec_inp1_ids,
         dec_inp2_ids,
         dec_trg1_ids,
         dec_trg2_ids,
+        max_oov_len,
         use_2_answers=False,
         **kwargs
     ):
@@ -94,7 +95,7 @@ class Backbone(nn.Module):
         # dec_trg1_ids: [bz, la]
         # dec_trg2_ids: [bz, la]
 
-        q, c = self.embedding(q_ids, q_masks), self.embedding(c_ids, c_masks)
+        q, c = self.embedding(q_ids, q_len), self.embedding(c_ids, c_len)
         # q, c: [bz, l_, d_hid]
 
         Y = self.ial(q, c)
@@ -107,7 +108,7 @@ class Backbone(nn.Module):
             a = self.embedding.embed_only(a_ids)
             # [bz, la, d_embd]
 
-            output_mle_ = self.pgn.do_train(Y, q, q_masks, a, c_ids_ext, c_masks)
+            output_mle_ = self.pgn.do_train(Y, q, q_masks, a, c_ids_ext, c_masks, max_oov_len)
             # [bz, la, d_vocab + lc]
 
             output_mle.append(output_mle_)
@@ -120,11 +121,14 @@ class Backbone(nn.Module):
         self,
         q_ids,
         q_masks,
+        q_len,
         c_ids,
         c_ids_ext,
         c_masks,
+        c_len,
         dec_trg1_ids,
         dec_trg2_ids,
+        max_oov_len,
         use_2_answers=False,
         **kwargs
     ):
@@ -138,16 +142,16 @@ class Backbone(nn.Module):
         # dec_trg1_ids: [bz, la]
         # dec_trg2_ids: [bz, la]
 
-        q, c = self.embedding(q_ids, q_masks), self.embedding(c_ids, c_masks)
+        q, c = self.embedding(q_ids, q_len), self.embedding(c_ids, c_len)
         # q, c: [bz, l_, d_hid]
 
         Y = self.ial(q, c)
         # [bz, l, 2*d_hid]
 
-        outputs = self.pgn.do_predict(Y, q, q_masks, c_ids_ext, c_masks)
+        outputs = self.pgn.do_predict(Y, q, q_masks, c_ids_ext, c_masks, max_oov_len)
         # [bz]
 
-        output_mle_ = self._ids2dist(outputs)
+        output_mle_ = self._ids2dist(outputs, max_oov_len)
         # [b, la, d_vocab + lc]
 
         if use_2_answers:
