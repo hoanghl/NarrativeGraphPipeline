@@ -1,8 +1,8 @@
 import re
 
-import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from nltk.translate.bleu_score import sentence_bleu
 from nltk.translate.meteor_score import meteor_score
 from rouge import Rouge
@@ -223,3 +223,77 @@ class TransEncoder(nn.Module):
             output, attention = encoder(output, k, v, attn_mask=attn_mask)
 
         return output
+
+
+class Loss(nn.Module):
+    """
+    Computes nll loss (Eq. (6)), coverage loss (Eq. (12)),
+    and the composite loss function that combines the two (Eq. (13)).
+    """
+
+    def __init__(self, use_coverage, use_ot_loss, encoder=None, gamma1=1, gamma2=0.1, pad_id=0):
+        super().__init__()
+        self.use_coverage = use_coverage
+        self.use_ot_loss = use_ot_loss
+        self.encoder = encoder
+        self.gamma1 = gamma1
+        self.gamma2 = gamma2
+        self.pad_id = 0
+
+    def nll_loss(self, output, target):
+        """
+        Negative log likelihood of target word - Eq. (6)
+        Args:
+            output: predicted probs from each timestep      [B x V_x T]
+            target: answer ids using extended vocab         [B x T]
+
+        Returns:
+            loss: nll loss value; averaged over batch & timestep
+        """
+        output = torch.log(output)
+        loss = F.nll_loss(output, target, ignore_index=self.pad_id, reduction="mean")
+        return loss
+
+    def cov_loss(self, attn_dist, coverage, dec_pad_mask, dec_len):
+        """
+        Coverage loss at timestep t - Eq. (12)
+        Args:
+            attn_dist: attention distribution from all timesteps            [B x L x T]
+            coverage: sum of previous attn dist's from all timesteps        [B x L x T]
+            dec_pad_mask: target sequence padding masks [PAD] -> True       [B x T]
+            dec_len: target sequence lengths                                [B]
+
+        Returns:
+            loss: coverage loss value; averaged over batch & timestep
+        """
+        min_val = torch.min(attn_dist, coverage)  # [B x L x T]
+        loss = torch.sum(min_val, dim=1)  # [B x T]
+
+        # ignore loss from [PAD] tokens
+        loss = loss.masked_fill_(dec_pad_mask, 0.0)
+        avg_loss = torch.sum(loss) / torch.sum(dec_len)
+        return avg_loss
+
+    def ot_loss(self, pred, trg):
+        return ipot(pred, trg, max_iter=400)
+
+    def forward(self, output_mle, cov, attn_dist, trg, dec_mask, dec_len):
+        nll_loss = self.nll_loss(output=output_mle, target=trg)
+
+        if self.use_coverage:
+            cov_loss = self.cov_loss(attn_dist, cov, dec_mask, dec_len)
+        else:
+            cov_loss = 0
+
+        if self.use_ot_loss:
+            # TODO: Modify later: remember output_mle takes tokens not in self.embedding (oov)
+            trg = self.encoder(trg)
+            pred = (
+                torch.softmax(output_mle, dim=-1) @ self.encoder.embedding.word_embeddings.weight
+            )
+            ot_loss = ipot(pred, trg, max_iter=400)
+        else:
+            ot_loss = 0
+
+        final_loss = nll_loss + self.gamma1 * cov_loss + self.gamma2 + ot_loss
+        return final_loss

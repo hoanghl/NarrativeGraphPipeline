@@ -65,7 +65,6 @@ class NarrativeModel(plt.LightningModule):
             block=block,
             dropout=dropout,
             path_pretrained=path_pretrained,
-            criterion=nn.NLLLoss(ignore_index=self.vocab.pad()),
             vocab=self.vocab,
         )
 
@@ -85,59 +84,47 @@ class NarrativeModel(plt.LightningModule):
             else:
                 params_nodecay.append(p)
 
-        optimizer_grouped_parameters = [
-            {
-                "params": params_decay,
-                "weight_decay": self.w_decay,
-            },
-            {
-                "params": params_nodecay,
-                "weight_decay": 0.0,
-            },
-        ]
+        # NOTE: Custom optimizer and lr scheduler are temporarily commented for experiment
+        # optimizer_grouped_parameters = [
+        #     {
+        #         "params": params_decay,
+        #         "weight_decay": self.w_decay,
+        #     },
+        #     {
+        #         "params": params_nodecay,
+        #         "weight_decay": 0.0,
+        #     },
+        # ]
         # optimizer = AdamW(params=optimizer_grouped_parameters, lr=self.lr)
-        optimizer = Adadelta(params=optimizer_grouped_parameters, lr=self.lr, eps=1e-4)
+        optimizer = Adadelta(params=self.parameters(), lr=self.lr, eps=1e-4)
 
-        lr_scheduler = {
-            "scheduler": get_linear_schedule_with_warmup(
-                optimizer,
-                num_warmup_steps=int(self.n_training_steps * self.warmup_rate),
-                num_training_steps=self.n_training_steps,
-            ),
-            "name": "learning_rate",
-            "interval": "step",
-            "frequency": 1,
-        }
-        return [optimizer], [lr_scheduler]
+        # lr_scheduler = {
+        #     "scheduler": get_linear_schedule_with_warmup(
+        #         optimizer,
+        #         num_warmup_steps=int(self.n_training_steps * self.warmup_rate),
+        #         num_training_steps=self.n_training_steps,
+        #     ),
+        #     "name": "learning_rate",
+        #     "interval": "step",
+        #     "frequency": 1,
+        # }
+        return [optimizer]
 
     ####################################################################
     # FOR TRAINING PURPOSE
     ####################################################################
 
     def training_step(self, batch, batch_idx: int):
-        # TODO: Later, enbale using second answer
-        # FIXME: Fix dec_inp2_ids and dec_trg2_ids
-        loss, logist = self.model.do_train(
-            q_ids=batch.q_input,
-            q_masks=batch.q_pad_mask,
-            q_len=batch.q_len,
-            c_ids=batch.c_input,
-            c_ids_ext=batch.c_input_ext,
-            c_masks=batch.c_pad_mask,
-            c_len=batch.c_len,
-            dec_inp1_ids=batch.dec_input,
-            dec_inp2_ids=batch.dec_input,
-            dec_trg1_ids=batch.dec_target,
-            dec_trg2_ids=batch.dec_target,
-            max_oov_len=batch.max_oov_len,
-        )
-        # logist: list of [b, la, d_vocab + lc]
+        # TODO: Later, enable using second answer
+        loss, logist = self.model.do_train(batch, use_2_answers=False)
+        # logist: list of [b, d_vocab + max_oov_len, la]
 
         if self.is_tuning is True:
             return {"loss": loss}
 
-        logist = [torch.argmax(logist_, dim=-1) for logist_ in logist]
+        logist = [torch.argmax(logist_, dim=1).tolist() for logist_ in logist]
         src_oovs = batch.src_oovs
+        # FIXME: Fix this using second answer
         trgs_ = [batch.a_text, batch.a_text] if self.use_2_answers else [batch.a_text]
 
         bz = batch.q_input.size(0)
@@ -178,22 +165,14 @@ class NarrativeModel(plt.LightningModule):
         self.train_results = []
 
     def validation_step(self, batch, batch_idx):
-        loss, outputs = self.model.do_predict(
-            q_ids=batch.q_input,
-            q_len=batch.q_len,
-            q_masks=batch.q_pad_mask,
-            c_ids=batch.c_input,
-            c_ids_ext=batch.c_input_ext,
-            c_masks=batch.c_pad_mask,
-            c_len=batch.c_len,
-            dec_trg1_ids=batch.dec_target,
-            dec_trg2_ids=batch.dec_target,
-            max_oov_len=batch.max_oov_len,
-        )
-        # logist: [b, la]
+        loss, outputs = self.model.do_predict(batch, use_2_answers=False)
+        # outputs: list of [b, la]
+
+        outputs = outputs.tolist()
 
         outputs = [outputs, outputs] if self.use_2_answers else [outputs]
         src_oovs = batch.src_oovs
+        # FIXME: Fix this using second answer
         trgs_ = [batch.a_text, batch.a_text] if self.use_2_answers else [batch.a_text]
 
         for output, trg_txt in zip(outputs, trgs_):

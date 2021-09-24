@@ -2,6 +2,16 @@
 
 ### This file contains changes and modifications during developing.
 
+## Sep 25, 1:02
+
+- Figure out what causes loss not decreasing
+- Restore old implementation of PGN following Yi Tay paper
+- Add Coverage loss
+- Refactor some pieces of code
+- Temporarily disable LR scheduler and Custom optimizer
+- Replace AdamW by Adadelta
+- Use data creator of origin paper
+
 ## Sep 19, 17:30
 
 - Discard _BERT embedding_, replace by _GloVe_

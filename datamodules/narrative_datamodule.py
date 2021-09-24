@@ -42,7 +42,6 @@ class NarrativeDataModule(plt.LightningDataModule):
         return SummDataset(q, c, a, vocab=self.vocab)
 
     def train_dataloader(self):
-        """Return DataLoader for training."""
         return DataLoaderBuilder()(
             dataset=self.data_train,
             vocab=self.vocab,
@@ -53,8 +52,6 @@ class NarrativeDataModule(plt.LightningDataModule):
         )
 
     def val_dataloader(self):
-        """Return DataLoader for validation."""
-
         return DataLoaderBuilder()(
             dataset=self.data_valid,
             vocab=self.vocab,
@@ -65,8 +62,6 @@ class NarrativeDataModule(plt.LightningDataModule):
         )
 
     def test_dataloader(self):
-        """Return DataLoader for prediction."""
-
         return DataLoaderBuilder()(
             dataset=self.data_test,
             vocab=self.vocab,
